@@ -90,13 +90,14 @@ export const DEFAULT_SETTINGS: CloudSettings = {
   celestialDistance: 100,
   celestialSize: 8,
 
-  godrays: false,
+  // God rays enabled by default for dramatic effect
+  godrays: true,
   godraysDuringDrag: false,
-  godraysSamples: 48,
+  godraysSamples: 64,
   godraysDensity: 0.95,
   godraysDecay: 0.965,
-  godraysWeight: 0.02,
-  godraysIntensity: 1.0,
+  godraysWeight: 0.03,
+  godraysIntensity: 1.2,
   godraysRadiusScale: 1.0,
 
   shapeSpeed: -5,
@@ -145,6 +146,10 @@ function cross3(a: number[], b: number[]): number[] {
     a[2] * b[0] - a[0] * b[2],
     a[0] * b[1] - a[1] * b[0],
   ];
+}
+
+function dot3(a: number[], b: number[]): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
 
 function add3(a: number[], b: number[]): number[] {
@@ -263,6 +268,11 @@ export function useCloudRenderer(canvasRef: React.RefObject<HTMLCanvasElement>) 
       needsHistoryResetRef.current = true;
     }
     if (prev.taa !== s.taa || prev.reproject !== s.reproject || prev.fovDeg !== s.fovDeg) {
+      needsHistoryResetRef.current = true;
+    }
+    if (prev.lighting !== s.lighting || prev.lightAzimuthDeg !== s.lightAzimuthDeg ||
+        prev.densityMultiplier !== s.densityMultiplier || prev.shapeStrength !== s.shapeStrength ||
+        prev.detailStrength !== s.detailStrength) {
       needsHistoryResetRef.current = true;
     }
   }, []);
@@ -682,6 +692,45 @@ void main() {
       needsBufferBRebuildRef.current = true;
     }
 
+    function computeLightUv(targetDir: number[], up: number[], settings: CloudSettings, rtWidth: number, rtHeight: number): { uv: number[], fade: number } | null {
+      if (rtWidth <= 0 || rtHeight <= 0) return null;
+
+      const upN = normalize3(up);
+      const zaxis = normalize3(targetDir);
+      const xaxis = normalize3(cross3(zaxis, upN));
+      const yaxis = cross3(xaxis, zaxis);
+
+      const azimuthRad = (settings.lightAzimuthDeg * Math.PI) / 180;
+      const lightDirWorld = normalize3([Math.cos(azimuthRad), settings.lightHeight, Math.sin(azimuthRad)]);
+
+      const camX = dot3(lightDirWorld, xaxis);
+      const camY = dot3(lightDirWorld, yaxis);
+      const camZ = dot3(lightDirWorld, [-zaxis[0], -zaxis[1], -zaxis[2]]);
+
+      // Smooth angular fade with forgiveness zone past 90°
+      const front = -camZ;
+      const t = clamp((front + 0.10) / 0.35, 0.0, 1.0);
+      const fade = t * t * (3.0 - 2.0 * t); // smoothstep
+
+      const z = (0.5 * rtHeight) / Math.tan(((settings.fovDeg * Math.PI) / 180) * 0.5);
+
+      let uvRaw: number[];
+      if (camZ < -1e-4) {
+        const k = (-z) / camZ;
+        const px = camX * k + rtWidth / 2;
+        const py = camY * k + rtHeight / 2;
+        uvRaw = [px / rtWidth, py / rtHeight];
+      } else {
+        const len = Math.hypot(camX, camY);
+        const dirx = len > 1e-6 ? camX / len : 0.0;
+        const diry = len > 1e-6 ? camY / len : 0.0;
+        uvRaw = [0.5 + dirx * 2.0, 0.5 + diry * 2.0];
+      }
+
+      const uv = [clamp(uvRaw[0], -0.5, 1.5), clamp(uvRaw[1], -0.5, 1.5)];
+      return { uv, fade };
+    }
+
     function tick() {
       if (destroyed) return;
       
@@ -942,6 +991,49 @@ void main() {
         gl.bindVertexArray(null);
       }
 
+      function renderGodrays(sceneTex: WebGLTexture, lightUvData: { uv: number[], fade: number } | null) {
+        if (!b.passGodrays || !lightUvData) {
+          renderBlit(sceneTex);
+          return;
+        }
+
+        const fade = lightUvData.fade;
+        if (fade <= 1e-4 || settings.godraysIntensity <= 0.0) {
+          renderBlit(sceneTex);
+          return;
+        }
+
+        const lightUv = lightUvData.uv;
+        const lightColor = hexToRgb01(settings.lightColor);
+
+        gl.useProgram(b.passGodrays.program);
+        gl.bindVertexArray(b.vao);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, rtWidth, rtHeight);
+
+        const u = b.passGodrays.uniforms;
+        gl.uniform2f(u.uResolution, rtWidth, rtHeight);
+        gl.uniform2f(u.uLightUv, lightUv[0], lightUv[1]);
+        gl.uniform3f(u.uLightColor, lightColor[0], lightColor[1], lightColor[2]);
+        gl.uniform1f(u.uIntensity, settings.godraysIntensity * fade);
+        gl.uniform1f(u.uDensity, settings.godraysDensity);
+        gl.uniform1f(u.uDecay, settings.godraysDecay);
+        gl.uniform1f(u.uWeight, settings.godraysWeight);
+        gl.uniform1i(u.uSamples, settings.godraysSamples);
+
+        const theta = Math.atan(settings.celestialSize / settings.celestialDistance);
+        const radiusUv = 0.5 * (Math.tan(theta) / Math.tan(((settings.fovDeg * Math.PI) / 180) * 0.5));
+        const sourceRadiusUv = Math.max(0.0005, radiusUv * settings.godraysRadiusScale);
+        gl.uniform1f(u.uSourceRadius, sourceRadiusUv);
+
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, sceneTex);
+        gl.uniform1i(u.uScene, 0);
+
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        gl.bindVertexArray(null);
+      }
+
       function renderAccum(targetDirCur: number[], targetDirPrev: number[], cameraPosCur: number[], cameraPosPrev: number[], cameraUpCur: number[], cameraUpPrev: number[], reset: boolean, alpha: number, useReproj: boolean) {
         gl.useProgram(b.passAccum.program);
         gl.bindVertexArray(b.vao);
@@ -995,6 +1087,10 @@ void main() {
         needsBufferBRebuildRef.current = false;
       }
 
+      // Compute light UV for god rays
+      const lightUvData = computeLightUv(cameraTargetDirRef.current, cameraUpRef.current, settings, rtWidth, rtHeight);
+      const shouldRenderGodrays = settings.godrays && (!isInteracting || settings.godraysDuringDrag);
+
       if (settings.taa) {
         const imagePassThisFrame = isInteracting && settings.fastWhileDrag ? b.passImageFast : b.passImage;
         gl.bindFramebuffer(gl.FRAMEBUFFER, b.currentColorFbo);
@@ -1019,6 +1115,8 @@ void main() {
         const finalTex = b.history.readTex;
         if (settings.debugDepth) {
           renderBlit(b.depth.readTex);
+        } else if (shouldRenderGodrays) {
+          renderGodrays(finalTex, lightUvData);
         } else {
           renderBlit(finalTex);
         }
@@ -1033,6 +1131,8 @@ void main() {
 
         if (settings.debugDepth) {
           renderBlit(b.depth.writeTex);
+        } else if (shouldRenderGodrays) {
+          renderGodrays(b.currentColorTex!, lightUvData);
         } else {
           renderBlit(b.currentColorTex!);
         }
