@@ -657,8 +657,11 @@ void main() {
 
       const settings = settingsRef.current;
       const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-      const rtWidth = Math.floor(canvas.clientWidth * settings.scale * dpr);
-      const rtHeight = Math.floor(canvas.clientHeight * settings.scale * dpr);
+      // Ensure we have valid dimensions - fallback to reasonable defaults if canvas isn't laid out yet
+      const clientWidth = canvas.clientWidth || window.innerWidth || 800;
+      const clientHeight = canvas.clientHeight || window.innerHeight || 600;
+      const rtWidth = Math.max(1, Math.floor(clientWidth * settings.scale * dpr));
+      const rtHeight = Math.max(1, Math.floor(clientHeight * settings.scale * dpr));
       canvas.width = rtWidth;
       canvas.height = rtHeight;
 
@@ -917,8 +920,18 @@ void main() {
         gl.bindTexture(gl.TEXTURE_2D, b.blueNoise);
         gl.uniform1i(pass.uniforms.iChannel2, 2);
 
+        gl.activeTexture(gl.TEXTURE3);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        gl.uniform1i(pass.uniforms.iChannel3, 3);
+
+        // iChannelResolution[0..3] - MUST pass all 4 channel resolutions as a 12-element array
         if (pass.uniforms.iChannelResolution0) {
-          gl.uniform3f(pass.uniforms.iChannelResolution0, 1, 4, 1);
+          gl.uniform3fv(pass.uniforms.iChannelResolution0, new Float32Array([
+            1, 4, 1,                        // channel0 (BufferA - 1x4)
+            rtWidth, rtHeight, 1,           // channel1 (BufferB - full resolution noise atlas)
+            BLUE_NOISE_SIZE, BLUE_NOISE_SIZE, 1, // channel2 (blue noise)
+            0, 0, 1,                        // channel3 (unused)
+          ]));
         }
       }
 
