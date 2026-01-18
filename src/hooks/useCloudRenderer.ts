@@ -40,7 +40,7 @@ export interface CloudSettings {
   godraysIntensity: number;
   godraysRadiusScale: number;
 
-  // Clouds
+  // Clouds - Shape
   shapeSpeed: number;
   detailSpeed: number;
   densityMultiplier: number;
@@ -51,6 +51,26 @@ export interface CloudSettings {
   cloudBottomFade01: number;
   cloudTopFade01: number;
   cloudEdgeFade01: number;
+  
+  // Clouds - Advanced dynamics
+  cloudCoverage: number;
+  cloudType: number;
+  windSpeed: number;
+  windDirection: number;
+  turbulence: number;
+  precipitation: number;
+
+  // Terrain
+  terrainEnabled: boolean;
+  terrainScale: number;
+  terrainHeight: number;
+  terrainDetail: number;
+  waterLevel: number;
+  snowLevel: number;
+  rockColor: string;
+  grassColor: string;
+  snowColor: string;
+  waterColor: string;
 
   // Camera
   cameraMode: 'orbit' | 'fly' | 'jet';
@@ -75,13 +95,13 @@ export const DEFAULT_SETTINGS: CloudSettings = {
   taaUseDragAlpha: true,
   taaAlphaDrag: 0.28,
 
-  lighting: 'night',
-  lightAzimuthDeg: (4.5 * 180) / Math.PI,
-  lightHeight: 0.25,
-  lightColor: '#a5ccff',
-  lightPower: 100,
-  exposure: 0.5,
-  stars: 1,
+  lighting: 'day',
+  lightAzimuthDeg: 45,
+  lightHeight: 0.5,
+  lightColor: '#fff8e0',
+  lightPower: 120,
+  exposure: 0.7,
+  stars: 0,
   nightSkyColor: '#08111a',
   daySkyZenithColor: '#3a7bd5',
   daySkyHorizonColor: '#d8f0ff',
@@ -100,6 +120,7 @@ export const DEFAULT_SETTINGS: CloudSettings = {
   godraysIntensity: 1.2,
   godraysRadiusScale: 1.0,
 
+  // Cloud shape
   shapeSpeed: -5,
   detailSpeed: -10,
   densityMultiplier: 0.075,
@@ -110,9 +131,29 @@ export const DEFAULT_SETTINGS: CloudSettings = {
   cloudBottomFade01: 0.08,
   cloudTopFade01: 0.12,
   cloudEdgeFade01: 0.10,
+  
+  // Cloud dynamics
+  cloudCoverage: 0.5,
+  cloudType: 0.5,
+  windSpeed: 10,
+  windDirection: 45,
+  turbulence: 0.3,
+  precipitation: 0,
 
-  cameraMode: 'orbit',
-  fovDeg: 55,
+  // Terrain
+  terrainEnabled: true,
+  terrainScale: 1.0,
+  terrainHeight: 1.0,
+  terrainDetail: 12,
+  waterLevel: 0.15,
+  snowLevel: 0.7,
+  rockColor: '#6b5b4f',
+  grassColor: '#3d6b2f',
+  snowColor: '#f0f5ff',
+  waterColor: '#1a4f6e',
+
+  cameraMode: 'jet',
+  fovDeg: 60,
   flightSpeed: 60,
   flightBoost: 2.5,
   flightDamping: 1.5,

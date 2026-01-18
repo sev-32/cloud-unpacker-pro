@@ -1,11 +1,16 @@
 import { useState } from 'react';
 import { CloudSettings } from '@/hooks/useCloudRenderer';
-import { ChevronDown, ChevronUp, Settings, Sun, Moon, Cloud, Sparkles } from 'lucide-react';
+import { 
+  ChevronDown, ChevronUp, Settings, Sun, Moon, Cloud, 
+  Sparkles, Mountain, Plane, Eye, EyeOff, Droplets, Wind
+} from 'lucide-react';
 
 interface ControlPanelProps {
   settings: CloudSettings;
   onUpdate: (settings: Partial<CloudSettings>) => void;
   fps: number;
+  onToggleHUD?: () => void;
+  showHUD?: boolean;
 }
 
 interface SliderProps {
@@ -58,6 +63,20 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
   );
 }
 
+function ColorPicker({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-xs text-white/70">{label}</span>
+      <input
+        type="color"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-8 h-6 rounded cursor-pointer border border-white/20"
+      />
+    </div>
+  );
+}
+
 interface SectionProps {
   title: string;
   icon: React.ReactNode;
@@ -89,30 +108,85 @@ function Section({ title, icon, children, defaultOpen = false }: SectionProps) {
   );
 }
 
-export function ControlPanel({ settings, onUpdate, fps }: ControlPanelProps) {
+export function ControlPanel({ settings, onUpdate, fps, onToggleHUD, showHUD }: ControlPanelProps) {
   const [isOpen, setIsOpen] = useState(true);
 
   return (
     <div className="absolute top-4 right-4 z-10">
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="mb-2 p-2 bg-black/60 backdrop-blur-sm rounded-lg border border-white/10 text-white/70 hover:text-white transition-colors"
-      >
-        <Settings size={18} />
-      </button>
+      <div className="flex gap-2 mb-2">
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className="p-2 bg-black/60 backdrop-blur-sm rounded-lg border border-white/10 text-white/70 hover:text-white transition-colors"
+        >
+          <Settings size={18} />
+        </button>
+        {settings.cameraMode === 'jet' && onToggleHUD && (
+          <button
+            onClick={onToggleHUD}
+            className="p-2 bg-black/60 backdrop-blur-sm rounded-lg border border-white/10 text-white/70 hover:text-white transition-colors"
+          >
+            {showHUD ? <EyeOff size={18} /> : <Eye size={18} />}
+          </button>
+        )}
+      </div>
 
       {isOpen && (
-        <div className="w-72 bg-black/80 backdrop-blur-md rounded-xl border border-white/10 overflow-hidden shadow-2xl">
+        <div className="w-80 bg-black/80 backdrop-blur-md rounded-xl border border-white/10 overflow-hidden shadow-2xl">
           {/* Header */}
           <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-white">Cloud Settings</h2>
+            <h2 className="text-sm font-semibold text-white">Flight Simulator</h2>
             <span className="text-xs text-white/50 font-mono">{fps.toFixed(0)} FPS</span>
           </div>
 
           {/* Scrollable content */}
-          <div className="max-h-[70vh] overflow-y-auto p-3 space-y-1">
+          <div className="max-h-[75vh] overflow-y-auto p-3 space-y-1">
+            {/* Camera Mode */}
+            <Section title="Camera Mode" icon={<Plane size={14} />} defaultOpen={true}>
+              <div className="flex gap-2 mb-2">
+                <button
+                  onClick={() => onUpdate({ cameraMode: 'orbit' })}
+                  className={`flex-1 py-1.5 px-2 text-xs rounded-lg transition-colors ${
+                    settings.cameraMode === 'orbit' 
+                      ? 'bg-purple-500/30 border border-purple-400/50 text-purple-200' 
+                      : 'bg-white/10 border border-white/10 text-white/60 hover:text-white'
+                  }`}
+                >
+                  Orbit
+                </button>
+                <button
+                  onClick={() => onUpdate({ cameraMode: 'fly' })}
+                  className={`flex-1 py-1.5 px-2 text-xs rounded-lg transition-colors ${
+                    settings.cameraMode === 'fly' 
+                      ? 'bg-purple-500/30 border border-purple-400/50 text-purple-200' 
+                      : 'bg-white/10 border border-white/10 text-white/60 hover:text-white'
+                  }`}
+                >
+                  Fly
+                </button>
+                <button
+                  onClick={() => onUpdate({ cameraMode: 'jet' })}
+                  className={`flex-1 py-1.5 px-2 text-xs rounded-lg transition-colors ${
+                    settings.cameraMode === 'jet' 
+                      ? 'bg-orange-500/30 border border-orange-400/50 text-orange-200' 
+                      : 'bg-white/10 border border-white/10 text-white/60 hover:text-white'
+                  }`}
+                >
+                  ✈️ Jet
+                </button>
+              </div>
+              <Slider
+                label="FOV"
+                value={settings.fovDeg}
+                min={20}
+                max={110}
+                step={1}
+                onChange={(v) => onUpdate({ fovDeg: v })}
+                format={(v) => `${v.toFixed(0)}°`}
+              />
+            </Section>
+
             {/* Render Settings */}
-            <Section title="Render" icon={<Settings size={14} />} defaultOpen={true}>
+            <Section title="Render" icon={<Settings size={14} />}>
               <Slider
                 label="Resolution Scale"
                 value={settings.scale}
@@ -166,7 +240,7 @@ export function ControlPanel({ settings, onUpdate, fps }: ControlPanelProps) {
                 </button>
               </div>
               <Slider
-                label="Light Azimuth"
+                label="Sun Azimuth"
                 value={settings.lightAzimuthDeg}
                 min={0}
                 max={360}
@@ -175,7 +249,7 @@ export function ControlPanel({ settings, onUpdate, fps }: ControlPanelProps) {
                 format={(v) => `${v.toFixed(0)}°`}
               />
               <Slider
-                label="Light Height"
+                label="Sun Height"
                 value={settings.lightHeight}
                 min={-1}
                 max={1}
@@ -189,7 +263,6 @@ export function ControlPanel({ settings, onUpdate, fps }: ControlPanelProps) {
                 max={400}
                 step={5}
                 onChange={(v) => onUpdate({ lightPower: v })}
-                format={(v) => v.toFixed(0)}
               />
               <Slider
                 label="Exposure"
@@ -199,18 +272,18 @@ export function ControlPanel({ settings, onUpdate, fps }: ControlPanelProps) {
                 step={0.05}
                 onChange={(v) => onUpdate({ exposure: v })}
               />
+            </Section>
+
+            {/* Clouds - Shape */}
+            <Section title="Cloud Shape" icon={<Cloud size={14} />}>
               <Slider
-                label="Stars"
-                value={settings.stars}
+                label="Coverage"
+                value={settings.cloudCoverage}
                 min={0}
                 max={1}
                 step={0.05}
-                onChange={(v) => onUpdate({ stars: v })}
+                onChange={(v) => onUpdate({ cloudCoverage: v })}
               />
-            </Section>
-
-            {/* Clouds */}
-            <Section title="Clouds" icon={<Cloud size={14} />}>
               <Slider
                 label="Density"
                 value={settings.densityMultiplier}
@@ -252,6 +325,28 @@ export function ControlPanel({ settings, onUpdate, fps }: ControlPanelProps) {
                 step={0.05}
                 onChange={(v) => onUpdate({ cloudThickness01: v })}
               />
+            </Section>
+
+            {/* Clouds - Dynamics */}
+            <Section title="Cloud Dynamics" icon={<Wind size={14} />}>
+              <Slider
+                label="Wind Speed"
+                value={settings.windSpeed}
+                min={0}
+                max={50}
+                step={1}
+                onChange={(v) => onUpdate({ windSpeed: v })}
+                format={(v) => `${v.toFixed(0)} m/s`}
+              />
+              <Slider
+                label="Wind Direction"
+                value={settings.windDirection}
+                min={0}
+                max={360}
+                step={5}
+                onChange={(v) => onUpdate({ windDirection: v })}
+                format={(v) => `${v.toFixed(0)}°`}
+              />
               <Slider
                 label="Shape Speed"
                 value={settings.shapeSpeed}
@@ -268,6 +363,14 @@ export function ControlPanel({ settings, onUpdate, fps }: ControlPanelProps) {
                 step={0.5}
                 onChange={(v) => onUpdate({ detailSpeed: v })}
               />
+              <Slider
+                label="Turbulence"
+                value={settings.turbulence}
+                min={0}
+                max={1}
+                step={0.05}
+                onChange={(v) => onUpdate({ turbulence: v })}
+              />
             </Section>
 
             {/* God Rays */}
@@ -279,11 +382,6 @@ export function ControlPanel({ settings, onUpdate, fps }: ControlPanelProps) {
               />
               {settings.godrays && (
                 <>
-                  <Toggle
-                    label="Show During Drag"
-                    checked={settings.godraysDuringDrag}
-                    onChange={(v) => onUpdate({ godraysDuringDrag: v })}
-                  />
                   <Slider
                     label="Intensity"
                     value={settings.godraysIntensity}
@@ -302,14 +400,6 @@ export function ControlPanel({ settings, onUpdate, fps }: ControlPanelProps) {
                     format={(v) => v.toFixed(0)}
                   />
                   <Slider
-                    label="Density"
-                    value={settings.godraysDensity}
-                    min={0.5}
-                    max={1.5}
-                    step={0.05}
-                    onChange={(v) => onUpdate({ godraysDensity: v })}
-                  />
-                  <Slider
                     label="Decay"
                     value={settings.godraysDecay}
                     min={0.9}
@@ -318,73 +408,97 @@ export function ControlPanel({ settings, onUpdate, fps }: ControlPanelProps) {
                     onChange={(v) => onUpdate({ godraysDecay: v })}
                     format={(v) => v.toFixed(3)}
                   />
-                  <Slider
-                    label="Weight"
-                    value={settings.godraysWeight}
-                    min={0.01}
-                    max={0.1}
-                    step={0.005}
-                    onChange={(v) => onUpdate({ godraysWeight: v })}
-                    format={(v) => v.toFixed(3)}
-                  />
                 </>
               )}
             </Section>
 
-            {/* Camera */}
-            <Section title="Camera" icon={<Settings size={14} />}>
-              <div className="flex gap-2 mb-2">
-                <button
-                  onClick={() => onUpdate({ cameraMode: 'orbit' })}
-                  className={`flex-1 py-1.5 px-3 text-xs rounded-lg transition-colors ${
-                    settings.cameraMode === 'orbit' 
-                      ? 'bg-purple-500/30 border border-purple-400/50 text-purple-200' 
-                      : 'bg-white/10 border border-white/10 text-white/60 hover:text-white'
-                  }`}
-                >
-                  Orbit
-                </button>
-                <button
-                  onClick={() => onUpdate({ cameraMode: 'fly' })}
-                  className={`flex-1 py-1.5 px-3 text-xs rounded-lg transition-colors ${
-                    settings.cameraMode === 'fly' 
-                      ? 'bg-purple-500/30 border border-purple-400/50 text-purple-200' 
-                      : 'bg-white/10 border border-white/10 text-white/60 hover:text-white'
-                  }`}
-                >
-                  Fly
-                </button>
-              </div>
-              <Slider
-                label="FOV"
-                value={settings.fovDeg}
-                min={20}
-                max={110}
-                step={1}
-                onChange={(v) => onUpdate({ fovDeg: v })}
-                format={(v) => `${v.toFixed(0)}°`}
+            {/* Terrain */}
+            <Section title="Terrain" icon={<Mountain size={14} />}>
+              <Toggle
+                label="Enable Terrain"
+                checked={settings.terrainEnabled}
+                onChange={(v) => onUpdate({ terrainEnabled: v })}
               />
-              {settings.cameraMode === 'fly' && (
+              {settings.terrainEnabled && (
                 <>
                   <Slider
-                    label="Flight Speed"
-                    value={settings.flightSpeed}
-                    min={10}
-                    max={200}
-                    step={5}
-                    onChange={(v) => onUpdate({ flightSpeed: v })}
+                    label="Scale"
+                    value={settings.terrainScale}
+                    min={0.1}
+                    max={3}
+                    step={0.1}
+                    onChange={(v) => onUpdate({ terrainScale: v })}
+                  />
+                  <Slider
+                    label="Height"
+                    value={settings.terrainHeight}
+                    min={0.1}
+                    max={3}
+                    step={0.1}
+                    onChange={(v) => onUpdate({ terrainHeight: v })}
+                  />
+                  <Slider
+                    label="Detail (Octaves)"
+                    value={settings.terrainDetail}
+                    min={3}
+                    max={16}
+                    step={1}
+                    onChange={(v) => onUpdate({ terrainDetail: v })}
                     format={(v) => v.toFixed(0)}
                   />
                   <Slider
-                    label="Flight Boost"
-                    value={settings.flightBoost}
-                    min={1}
-                    max={5}
-                    step={0.1}
-                    onChange={(v) => onUpdate({ flightBoost: v })}
+                    label="Water Level"
+                    value={settings.waterLevel}
+                    min={0}
+                    max={0.5}
+                    step={0.01}
+                    onChange={(v) => onUpdate({ waterLevel: v })}
                   />
+                  <Slider
+                    label="Snow Level"
+                    value={settings.snowLevel}
+                    min={0.3}
+                    max={1}
+                    step={0.02}
+                    onChange={(v) => onUpdate({ snowLevel: v })}
+                  />
+                  <div className="space-y-2 pt-2 border-t border-white/10">
+                    <div className="text-xs text-white/50">Terrain Colors</div>
+                    <ColorPicker
+                      label="Rock"
+                      value={settings.rockColor}
+                      onChange={(v) => onUpdate({ rockColor: v })}
+                    />
+                    <ColorPicker
+                      label="Grass"
+                      value={settings.grassColor}
+                      onChange={(v) => onUpdate({ grassColor: v })}
+                    />
+                    <ColorPicker
+                      label="Snow"
+                      value={settings.snowColor}
+                      onChange={(v) => onUpdate({ snowColor: v })}
+                    />
+                    <ColorPicker
+                      label="Water"
+                      value={settings.waterColor}
+                      onChange={(v) => onUpdate({ waterColor: v })}
+                    />
+                  </div>
                 </>
               )}
+            </Section>
+
+            {/* Water */}
+            <Section title="Precipitation" icon={<Droplets size={14} />}>
+              <Slider
+                label="Rain/Snow"
+                value={settings.precipitation}
+                min={0}
+                max={1}
+                step={0.05}
+                onChange={(v) => onUpdate({ precipitation: v })}
+              />
             </Section>
           </div>
 
@@ -392,7 +506,9 @@ export function ControlPanel({ settings, onUpdate, fps }: ControlPanelProps) {
           <div className="px-4 py-2 border-t border-white/10 text-xs text-white/40 text-center">
             {settings.cameraMode === 'orbit' 
               ? 'Drag to rotate • Scroll to zoom' 
-              : 'Click to lock • WASD to move'}
+              : settings.cameraMode === 'fly'
+              ? 'Click to lock • WASD to move'
+              : 'Click to fly • WASD: Control • Shift/Ctrl: Throttle'}
           </div>
         </div>
       )}
