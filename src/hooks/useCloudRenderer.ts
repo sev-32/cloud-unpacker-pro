@@ -248,6 +248,17 @@ export function useCloudRenderer(canvasRef: React.RefObject<HTMLCanvasElement>) 
     y: 0.07,
     roll: 0,
   });
+  
+  // Extended flight data for HUD
+  const flightDataRef = useRef({
+    airspeed: 0,
+    altitude: 700,
+    heading: 0,
+    pitch: 0,
+    roll: 0,
+    throttle: 0.5,
+    gForce: 1.0,
+  });
 
   const isPointerLockedRef = useRef(false);
   const flyLookRef = useRef({ dx: 0, dy: 0 });
@@ -613,6 +624,9 @@ void main() {
         'uCloudShapeSpeed', 'uCloudDetailSpeed', 'uCloudDensity', 'uCloudShapeStrength',
         'uCloudDetailStrength', 'uCloudBase01', 'uCloudThickness01', 'uCloudBottomFade01',
         'uCloudTopFade01', 'uCloudEdgeFade01',
+        // Terrain uniforms
+        'uTerrainEnabled', 'uTerrainScale', 'uTerrainHeight', 'uTerrainDetail',
+        'uWaterLevel', 'uSnowLevel', 'uRockColor', 'uGrassColor', 'uSnowColor', 'uWaterColor',
       ];
 
       const passImageProgram = createProgram(gl, vertexShaderSource, imageSource);
@@ -869,9 +883,14 @@ void main() {
         let upNoRoll = normalize3(cross3(right, forward));
 
         if (settings.flightBank) {
-          const maxRoll = 0.9;
-          const rollTarget = clamp(-dxNorm * 3.5 * 8.0 * settings.flightBankStrength, -maxRoll, maxRoll);
-          const k = 1 - Math.exp(-8.0 * dt);
+          const maxRoll = 1.2; // Increased max roll for more dramatic banking
+          const speed = Math.hypot(flightState.vel[0], flightState.vel[1], flightState.vel[2]);
+          const speedFactor = Math.min(1.0, speed / settings.flightSpeed); // Scale with speed
+          
+          // FIXED: Removed negative sign - turning right (positive dxNorm) should bank right (positive roll)
+          // Also made banking proportional to speed - faster = more bank
+          const rollTarget = clamp(dxNorm * 3.5 * 12.0 * settings.flightBankStrength * speedFactor, -maxRoll, maxRoll);
+          const k = 1 - Math.exp(-6.0 * dt); // Slightly slower response for smoother feel
           flightAngles.roll = flightAngles.roll + (rollTarget - flightAngles.roll) * k;
         } else {
           const k = 1 - Math.exp(-8.0 * dt);
@@ -917,6 +936,17 @@ void main() {
         const hasLookInput = isPointerLockedRef.current && (Math.abs(lookDx) + Math.abs(lookDy) > 0);
         const hasMoveInput = Math.abs(forwardInput) + Math.abs(rightInput) + Math.abs(upInput) > 0;
         isInteracting = hasLookInput || hasMoveInput || speedNow > 0.05;
+        
+        // Update flight data for HUD
+        flightDataRef.current = {
+          airspeed: speedNow,
+          altitude: flightState.pos[1],
+          heading: flightAngles.x,
+          pitch: flightAngles.y,
+          roll: flightAngles.roll,
+          throttle: boost > 1 ? 1 : (key('shift') ? 1 : 0.5),
+          gForce: 1.0 + Math.abs(flightAngles.roll) * 0.5,
+        };
       }
 
       // Check if we need to resize
@@ -1015,6 +1045,22 @@ void main() {
         if (u.uHarnessTargetDir) gl.uniform3f(u.uHarnessTargetDir, targetDir[0], targetDir[1], targetDir[2]);
         if (u.uHarnessCameraUp) gl.uniform3f(u.uHarnessCameraUp, cameraUp[0], cameraUp[1], cameraUp[2]);
         if (u.uHarnessFovDeg) gl.uniform1f(u.uHarnessFovDeg, s.fovDeg);
+        
+        // Terrain uniforms
+        if (u.uTerrainEnabled) gl.uniform1f(u.uTerrainEnabled, s.terrainEnabled ? 1.0 : 0.0);
+        if (u.uTerrainScale) gl.uniform1f(u.uTerrainScale, s.terrainScale);
+        if (u.uTerrainHeight) gl.uniform1f(u.uTerrainHeight, s.terrainHeight);
+        if (u.uTerrainDetail) gl.uniform1f(u.uTerrainDetail, s.terrainDetail);
+        if (u.uWaterLevel) gl.uniform1f(u.uWaterLevel, s.waterLevel);
+        if (u.uSnowLevel) gl.uniform1f(u.uSnowLevel, s.snowLevel);
+        const rockColor = hexToRgb01(s.rockColor);
+        if (u.uRockColor) gl.uniform3f(u.uRockColor, rockColor[0], rockColor[1], rockColor[2]);
+        const grassColor = hexToRgb01(s.grassColor);
+        if (u.uGrassColor) gl.uniform3f(u.uGrassColor, grassColor[0], grassColor[1], grassColor[2]);
+        const snowColor = hexToRgb01(s.snowColor);
+        if (u.uSnowColor) gl.uniform3f(u.uSnowColor, snowColor[0], snowColor[1], snowColor[2]);
+        const waterColor = hexToRgb01(s.waterColor);
+        if (u.uWaterColor) gl.uniform3f(u.uWaterColor, waterColor[0], waterColor[1], waterColor[2]);
       }
 
       function renderPass(pass: any, fbo: WebGLFramebuffer | null, w: number, h: number) {
@@ -1300,5 +1346,7 @@ void main() {
     settings: settingsRef.current,
     updateSettings,
     resetHistory,
+    flightData: flightDataRef.current,
+    cameraPos: cameraPosRef.current,
   };
 }

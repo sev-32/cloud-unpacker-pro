@@ -113,11 +113,176 @@ uniform float uCloudBottomFade01; // default: 0.08
 uniform float uCloudTopFade01;    // default: 0.12
 uniform float uCloudEdgeFade01;   // default: 0.10
 
+// Terrain uniforms
+uniform float uTerrainEnabled;    // 0 = off, 1 = on
+uniform float uTerrainScale;      // default: 1.0
+uniform float uTerrainHeight;     // max height multiplier
+uniform float uTerrainDetail;     // octave count (3-16)
+uniform float uWaterLevel;        // normalized 0-1
+uniform float uSnowLevel;         // normalized 0-1
+uniform vec3 uRockColor;          // rock/cliff color
+uniform vec3 uGrassColor;         // vegetation color
+uniform vec3 uSnowColor;          // snow color
+uniform vec3 uWaterColor;         // water/ocean color
+
 const float cloudStart = 0.0;
 const float cloudEnd = CLOUD_EXTENT;
 
 const vec3 minCorner = vec3(-CLOUD_EXTENT, cloudStart, -CLOUD_EXTENT);
 const vec3 maxCorner = vec3(CLOUD_EXTENT, cloudEnd, CLOUD_EXTENT);
+
+const mat2 m2 = mat2(0.8, -0.6, 0.6, 0.8);
+const float SC = 250.0; // Terrain scale constant
+
+// ============= TERRAIN FUNCTIONS =============
+float hash2D(vec2 p) {
+  p = 50.0 * fract(p * 0.3183099);
+  return fract(p.x * p.y * (p.x + p.y));
+}
+
+vec3 noised2D(vec2 x) {
+  vec2 f = fract(x);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  vec2 du = 6.0 * f * (1.0 - f);
+  
+  vec2 i = floor(x);
+  float a = hash2D(i);
+  float b = hash2D(i + vec2(1.0, 0.0));
+  float c = hash2D(i + vec2(0.0, 1.0));
+  float d = hash2D(i + vec2(1.0, 1.0));
+  
+  return vec3(
+    a + (b - a) * u.x + (c - a) * u.y + (a - b - c + d) * u.x * u.y,
+    du * (vec2(b - a, c - a) + (a - b - c + d) * u.yx)
+  );
+}
+
+float terrainH(vec2 x, int octaves) {
+  vec2 p = x * 0.003 / SC;
+  float a = 0.0;
+  float b = 1.0;
+  vec2 d = vec2(0.0);
+  
+  for (int i = 0; i < 16; i++) {
+    if (i >= octaves) break;
+    vec3 n = noised2D(p);
+    d += n.yz;
+    a += b * n.x / (1.0 + dot(d, d)); // Erosion effect
+    b *= 0.5;
+    p = m2 * p * 2.0;
+  }
+  
+  return SC * 120.0 * a * uTerrainScale * uTerrainHeight;
+}
+
+float terrainM(vec2 x) { return terrainH(x, 9); }
+float terrainL(vec2 x) { return terrainH(x, 3); }
+
+vec3 calcTerrainNormal(vec3 pos, float t) {
+  float eps = max(0.001 * t, 0.1);
+  vec2 e = vec2(eps, 0.0);
+  return normalize(vec3(
+    terrainM(pos.xz - e.xy) - terrainM(pos.xz + e.xy),
+    2.0 * eps,
+    terrainM(pos.xz - e.yx) - terrainM(pos.xz + e.yx)
+  ));
+}
+
+float raycastTerrain(vec3 ro, vec3 rd, float tmin, float tmax) {
+  float t = tmin;
+  for (int i = 0; i < 200; i++) {
+    vec3 pos = ro + t * rd;
+    float h = pos.y - terrainM(pos.xz);
+    if (abs(h) < 0.0015 * t || t > tmax) break;
+    t += 0.4 * h;
+  }
+  return t;
+}
+
+float terrainShadow(vec3 ro, vec3 rd) {
+  float minStep = SC * 0.5;
+  float res = 1.0;
+  float t = 0.001;
+  
+  for (int i = 0; i < 48; i++) {
+    vec3 p = ro + t * rd;
+    float h = p.y - terrainM(p.xz);
+    res = min(res, 16.0 * h / t);
+    t += max(minStep, h);
+    if (res < 0.001 || p.y > SC * 200.0) break;
+  }
+  
+  return clamp(res, 0.0, 1.0);
+}
+
+float fbmTerrain(vec2 p) {
+  float f = 0.0;
+  float b = 0.5;
+  for (int i = 0; i < 4; i++) {
+    f += b * hash2D(p);
+    b *= 0.5;
+    p = m2 * p * 2.02;
+  }
+  return f / 0.9375;
+}
+
+vec3 getTerrainColor(vec3 pos, vec3 nor, vec3 rd, vec3 sunDir, float dist) {
+  vec3 col;
+  
+  float maxH = SC * 120.0 * uTerrainScale * uTerrainHeight;
+  float h = pos.y / max(1.0, maxH);
+  float waterLevel = uWaterLevel * 0.2;
+  float snowLevel = uSnowLevel;
+  
+  // Water
+  if (pos.y < waterLevel * maxH) {
+    col = uWaterColor;
+    // Specular on water
+    vec3 hal = normalize(sunDir - rd);
+    float spec = pow(max(dot(vec3(0,1,0), hal), 0.0), 64.0);
+    col += spec * vec3(1.0, 0.9, 0.7) * 0.5;
+    return col;
+  }
+  
+  // Rock base
+  float r = hash2D(pos.xz * 0.01);
+  col = (r * 0.25 + 0.75) * 0.9 * uRockColor;
+  
+  // Grass on gentle slopes
+  float grassMask = smoothstep(0.70, 0.9, nor.y);
+  col = mix(col, uGrassColor * (0.5 + 0.5 * r), grassMask);
+  
+  // Snow at high altitude
+  float snowH = smoothstep(snowLevel - 0.1, snowLevel + 0.1, h + 0.25 * fbmTerrain(pos.xz * 0.01));
+  float snowSlope = smoothstep(1.0 - 0.5 * snowH, 1.0 - 0.1 * snowH, nor.y);
+  float snow = snowH * snowSlope;
+  col = mix(col, uSnowColor, smoothstep(0.1, 0.9, snow));
+  
+  // Lighting
+  float amb = clamp(0.5 + 0.5 * nor.y, 0.0, 1.0);
+  float dif = clamp(dot(sunDir, nor), 0.0, 1.0);
+  float bac = clamp(0.2 + 0.8 * dot(normalize(vec3(-sunDir.x, 0.0, sunDir.z)), nor), 0.0, 1.0);
+  
+  float sh = dif >= 0.0001 ? terrainShadow(pos + sunDir * SC * 0.05, sunDir) : 1.0;
+  
+  vec3 lin = vec3(0.0);
+  lin += dif * vec3(8.0, 5.0, 3.0) * 0.8 * vec3(sh, sh * sh * 0.5 + 0.5 * sh, sh * sh * 0.8 + 0.2 * sh);
+  lin += amb * vec3(0.4, 0.6, 1.0) * 0.6;
+  lin += bac * vec3(0.4, 0.5, 0.6) * 0.3;
+  col *= lin;
+  
+  // Specular for snow
+  vec3 hal = normalize(sunDir - rd);
+  col += snow * 0.5 * pow(clamp(1.0 + dot(hal, rd), 0.0, 1.0), 5.0) *
+         vec3(7.0, 5.0, 3.0) * dif * sh * pow(clamp(dot(nor, hal), 0.0, 1.0), 16.0);
+  
+  // Distance fog
+  float fo = 1.0 - exp(-pow(0.0008 * dist / SC, 1.5));
+  vec3 fogCol = 0.65 * vec3(0.4, 0.65, 1.0);
+  col = mix(col, fogCol, fo);
+  
+  return col;
+}
 
 vec3 rayDirection(float fieldOfView, vec2 fragCoord) {
   vec2 xy = fragCoord - iResolution.xy / 2.0;
@@ -425,9 +590,19 @@ float lightRay(vec3 org, vec3 p, float mu, vec3 lightDirection) {
 
   float beersLaw = multipleOctaves(lightRayDensity, mu, stepL);
 
-  // Return product of Beer's law and powder effect depending on the
-  // view direction angle with the light direction.
-  return mix(beersLaw * 2.0 * (1.0 - (exp(-stepL * lightRayDensity * 2.0))), beersLaw, 0.5 + 0.5 * mu);
+  // Enhanced powder effect that works better when backlit
+  float powder = 2.0 * (1.0 - exp(-stepL * lightRayDensity * 2.0));
+  
+  // Add minimum ambient contribution to prevent complete blackness when looking away from light
+  // This simulates ambient sky illumination and multiple scattering from all directions
+  float ambientScatter = 0.15 + 0.1 * (1.0 - mu); // More ambient when looking away from light
+  
+  // Blend between powder effect and pure beer's law based on view angle
+  // When looking away from light (low mu), use more beer's law with ambient boost
+  float directLight = mix(beersLaw * powder, beersLaw, 0.5 + 0.5 * mu);
+  
+  // Combine direct and ambient lighting
+  return max(directLight, ambientScatter * beersLaw);
 }
 
 // Get the colour along the main view ray.
@@ -503,12 +678,14 @@ vec3 mainRay(
 
     // If there is a cloud at the sample point.
     if (density > 0.0) {
-      // Constant lighting factor based on the height of the sample point.
-      vec3 ambient = lightColour * mix((0.0), (0.2), cloudHeight);
+      // Enhanced ambient lighting - base ambient plus height-based contribution
+      // Add extra ambient when looking away from the light source
+      float ambientBoost = 0.3 + 0.2 * (1.0 - clamp(dot(dir, lightDirection), 0.0, 1.0));
+      vec3 ambient = lightColour * mix(ambientBoost * 0.5, ambientBoost, cloudHeight);
 
       // Amount of sunlight that reaches the sample point through the cloud
       // is the combination of ambient light and attenuated direct light.
-      vec3 luminance = 0.2 * ambient + moonLight * phaseFunction * lightRay(org, p, mu, lightDirection);
+      vec3 luminance = 0.3 * ambient + moonLight * phaseFunction * lightRay(org, p, mu, lightDirection);
 
       // Scale light contribution by density of the cloud.
       luminance *= sampleSigmaS;
@@ -662,6 +839,32 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
   float diskRadius = 0.5 * (1.0 - cos(atan(uCelestialSize / uCelestialDistance)));
 
+  // ============= TERRAIN RENDERING =============
+  vec3 terrainColor = vec3(0.0);
+  float terrainT = -1.0;
+  
+  if (uTerrainEnabled > 0.5 && rayDir.y < 0.3) {
+    float tmax = 8000.0 * SC;
+    float maxh = 250.0 * SC * uTerrainScale * uTerrainHeight;
+    float tmin = 1.0;
+    
+    // Clip ray against terrain bounding volume
+    float tp = (maxh - cameraPos.y) / rayDir.y;
+    if (tp > 0.0) {
+      if (cameraPos.y > maxh) tmin = max(tmin, tp);
+      else tmax = min(tmax, tp);
+    }
+    
+    terrainT = raycastTerrain(cameraPos, rayDir, tmin, tmax);
+    
+    if (terrainT < tmax - 1.0) {
+      vec3 terrainPos = cameraPos + terrainT * rayDir;
+      vec3 terrainNor = calcTerrainNormal(terrainPos, terrainT);
+      terrainColor = getTerrainColor(terrainPos, terrainNor, rayDir, lightDirection, terrainT);
+    }
+  }
+
+  // ============= SKY BACKGROUND =============
   vec3 background = vec3(0.0);
   if (uLightingMode == 0) {
     // Get sky colour and stars.
@@ -688,6 +891,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     background += uLightColor * uSunDiskIntensity * disk;
     background += uLightColor * uSunGlowIntensity * saturate(getGlow(1.0 - mu, diskRadius, 2.0));
   }
+  
+  // Use terrain as background if it was hit
+  if (terrainT > 0.0) {
+    background = terrainColor;
+  }
 
   float totalTransmittance = 1.0;
   float depth = 0.0;
@@ -703,7 +911,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
                              offset
                            );
 
-  gHarnessDepth = depth;
+  gHarnessDepth = depth > 0.0 ? depth : (terrainT > 0.0 ? terrainT : 0.0);
 
   colour += background * totalTransmittance;
 
