@@ -59,6 +59,11 @@ export interface CloudSettings {
   windDirection: number;
   turbulence: number;
   precipitation: number;
+  
+  // Weather / Thunderstorm
+  lightningIntensity: number;
+  stormDarkness: number;
+  weatherPreset: 'clear' | 'cloudy' | 'stormy';
 
   // Terrain
   terrainEnabled: boolean;
@@ -134,11 +139,16 @@ export const DEFAULT_SETTINGS: CloudSettings = {
   
   // Cloud dynamics
   cloudCoverage: 0.5,
-  cloudType: 0.5,
+  cloudType: 0.3, // Slightly towards cumulus by default
   windSpeed: 10,
   windDirection: 45,
   turbulence: 0.3,
   precipitation: 0,
+  
+  // Weather
+  lightningIntensity: 0,
+  stormDarkness: 0,
+  weatherPreset: 'clear',
 
   // Terrain
   terrainEnabled: true,
@@ -627,6 +637,9 @@ void main() {
         // Terrain uniforms
         'uTerrainEnabled', 'uTerrainScale', 'uTerrainHeight', 'uTerrainDetail',
         'uWaterLevel', 'uSnowLevel', 'uRockColor', 'uGrassColor', 'uSnowColor', 'uWaterColor',
+        // Multi-layer cloud and weather uniforms
+        'uCloudCoverage', 'uCloudTypeBlend', 'uWindSpeed', 'uWindDirection',
+        'uTurbulence', 'uPrecipitation', 'uLightningIntensity', 'uStormDarkness',
       ];
 
       const passImageProgram = createProgram(gl, vertexShaderSource, imageSource);
@@ -1061,6 +1074,16 @@ void main() {
         if (u.uSnowColor) gl.uniform3f(u.uSnowColor, snowColor[0], snowColor[1], snowColor[2]);
         const waterColor = hexToRgb01(s.waterColor);
         if (u.uWaterColor) gl.uniform3f(u.uWaterColor, waterColor[0], waterColor[1], waterColor[2]);
+        
+        // Multi-layer cloud and weather uniforms
+        if (u.uCloudCoverage) gl.uniform1f(u.uCloudCoverage, s.cloudCoverage);
+        if (u.uCloudTypeBlend) gl.uniform1f(u.uCloudTypeBlend, s.cloudType);
+        if (u.uWindSpeed) gl.uniform1f(u.uWindSpeed, s.windSpeed * 0.001); // Scale for shader
+        if (u.uWindDirection) gl.uniform1f(u.uWindDirection, s.windDirection * Math.PI / 180); // Convert to radians
+        if (u.uTurbulence) gl.uniform1f(u.uTurbulence, s.turbulence);
+        if (u.uPrecipitation) gl.uniform1f(u.uPrecipitation, s.precipitation);
+        if (u.uLightningIntensity) gl.uniform1f(u.uLightningIntensity, s.lightningIntensity || 0);
+        if (u.uStormDarkness) gl.uniform1f(u.uStormDarkness, s.stormDarkness || 0);
       }
 
       function renderPass(pass: any, fbo: WebGLFramebuffer | null, w: number, h: number) {

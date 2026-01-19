@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { CloudSettings } from '@/hooks/useCloudRenderer';
 import { 
   ChevronDown, ChevronUp, Settings, Sun, Moon, Cloud, 
-  Sparkles, Mountain, Plane, Eye, EyeOff, Droplets, Wind
+  Sparkles, Mountain, Plane, Eye, EyeOff, Droplets, Wind, CloudLightning
 } from 'lucide-react';
 
 interface ControlPanelProps {
@@ -284,6 +284,50 @@ export function ControlPanel({ settings, onUpdate, fps, onToggleHUD, showHUD }: 
                 step={0.05}
                 onChange={(v) => onUpdate({ cloudCoverage: v })}
               />
+              <div className="space-y-1">
+                <div className="text-xs text-white/70">Cloud Type</div>
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => onUpdate({ cloudType: 0.0 })}
+                    className={`flex-1 py-1 px-1 text-[10px] rounded transition-colors ${
+                      settings.cloudType < 0.33 
+                        ? 'bg-blue-500/30 border border-blue-400/50 text-blue-200' 
+                        : 'bg-white/10 border border-white/10 text-white/60 hover:text-white'
+                    }`}
+                  >
+                    Cumulus
+                  </button>
+                  <button
+                    onClick={() => onUpdate({ cloudType: 0.5 })}
+                    className={`flex-1 py-1 px-1 text-[10px] rounded transition-colors ${
+                      settings.cloudType >= 0.33 && settings.cloudType < 0.67
+                        ? 'bg-gray-500/30 border border-gray-400/50 text-gray-200' 
+                        : 'bg-white/10 border border-white/10 text-white/60 hover:text-white'
+                    }`}
+                  >
+                    Stratus
+                  </button>
+                  <button
+                    onClick={() => onUpdate({ cloudType: 1.0 })}
+                    className={`flex-1 py-1 px-1 text-[10px] rounded transition-colors ${
+                      settings.cloudType >= 0.67 
+                        ? 'bg-purple-500/30 border border-purple-400/50 text-purple-200' 
+                        : 'bg-white/10 border border-white/10 text-white/60 hover:text-white'
+                    }`}
+                  >
+                    Cirrus
+                  </button>
+                </div>
+              </div>
+              <Slider
+                label="Type Blend"
+                value={settings.cloudType}
+                min={0}
+                max={1}
+                step={0.02}
+                onChange={(v) => onUpdate({ cloudType: v })}
+                format={(v) => v < 0.33 ? 'Cumulus' : v < 0.67 ? 'Stratus' : 'Cirrus'}
+              />
               <Slider
                 label="Density"
                 value={settings.densityMultiplier}
@@ -489,15 +533,84 @@ export function ControlPanel({ settings, onUpdate, fps, onToggleHUD, showHUD }: 
               )}
             </Section>
 
-            {/* Water */}
-            <Section title="Precipitation" icon={<Droplets size={14} />}>
+            {/* Weather */}
+            <Section title="Weather" icon={<CloudLightning size={14} />}>
+              <div className="flex gap-2 mb-2">
+                <button
+                  onClick={() => onUpdate({ 
+                    weatherPreset: 'clear',
+                    cloudCoverage: 0.3,
+                    precipitation: 0,
+                    lightningIntensity: 0,
+                    stormDarkness: 0 
+                  })}
+                  className={`flex-1 py-1.5 px-2 text-xs rounded-lg transition-colors ${
+                    settings.weatherPreset === 'clear' 
+                      ? 'bg-yellow-500/30 border border-yellow-400/50 text-yellow-200' 
+                      : 'bg-white/10 border border-white/10 text-white/60 hover:text-white'
+                  }`}
+                >
+                  ☀️ Clear
+                </button>
+                <button
+                  onClick={() => onUpdate({ 
+                    weatherPreset: 'cloudy',
+                    cloudCoverage: 0.7,
+                    cloudType: 0.4,
+                    precipitation: 0.2,
+                    lightningIntensity: 0,
+                    stormDarkness: 0.2
+                  })}
+                  className={`flex-1 py-1.5 px-2 text-xs rounded-lg transition-colors ${
+                    settings.weatherPreset === 'cloudy' 
+                      ? 'bg-gray-500/30 border border-gray-400/50 text-gray-200' 
+                      : 'bg-white/10 border border-white/10 text-white/60 hover:text-white'
+                  }`}
+                >
+                  ☁️ Cloudy
+                </button>
+                <button
+                  onClick={() => onUpdate({ 
+                    weatherPreset: 'stormy',
+                    cloudCoverage: 0.95,
+                    cloudType: 0.3,
+                    precipitation: 0.8,
+                    lightningIntensity: 0.5,
+                    stormDarkness: 0.5,
+                    turbulence: 0.7
+                  })}
+                  className={`flex-1 py-1.5 px-2 text-xs rounded-lg transition-colors ${
+                    settings.weatherPreset === 'stormy' 
+                      ? 'bg-purple-500/30 border border-purple-400/50 text-purple-200' 
+                      : 'bg-white/10 border border-white/10 text-white/60 hover:text-white'
+                  }`}
+                >
+                  ⛈️ Storm
+                </button>
+              </div>
               <Slider
-                label="Rain/Snow"
+                label="Precipitation"
                 value={settings.precipitation}
                 min={0}
                 max={1}
                 step={0.05}
                 onChange={(v) => onUpdate({ precipitation: v })}
+              />
+              <Slider
+                label="Lightning"
+                value={settings.lightningIntensity || 0}
+                min={0}
+                max={1}
+                step={0.05}
+                onChange={(v) => onUpdate({ lightningIntensity: v })}
+              />
+              <Slider
+                label="Storm Darkness"
+                value={settings.stormDarkness || 0}
+                min={0}
+                max={1}
+                step={0.05}
+                onChange={(v) => onUpdate({ stormDarkness: v })}
               />
             </Section>
           </div>
