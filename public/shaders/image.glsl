@@ -125,6 +125,23 @@ uniform vec3 uGrassColor;         // vegetation color
 uniform vec3 uSnowColor;          // snow color
 uniform vec3 uWaterColor;         // water/ocean color
 
+// Multi-layer cloud and weather uniforms
+uniform float uCloudCoverage;     // 0-1 overall coverage
+uniform float uCloudTypeBlend;    // 0=cumulus, 0.5=stratus, 1=cirrus
+uniform float uWindSpeed;         // wind animation speed (m/s)
+uniform float uWindDirection;     // wind direction in radians
+uniform float uTurbulence;        // turbulence intensity
+uniform float uPrecipitation;     // precipitation intensity (darkens clouds)
+
+// Weather/thunderstorm uniforms
+uniform float uLightningIntensity; // 0-1 lightning flash intensity
+uniform float uStormDarkness;      // 0-1 darkens sky during storm
+
+// Cloud layer heights
+#define CLOUD_LAYER_LOW 200.0
+#define CLOUD_LAYER_MID 500.0
+#define CLOUD_LAYER_HIGH 900.0
+
 const float cloudStart = 0.0;
 const float cloudEnd = CLOUD_EXTENT;
 
@@ -133,6 +150,75 @@ const vec3 maxCorner = vec3(CLOUD_EXTENT, cloudEnd, CLOUD_EXTENT);
 
 const mat2 m2 = mat2(0.8, -0.6, 0.6, 0.8);
 const float SC = 250.0; // Terrain scale constant
+
+// ============= ENHANCED 3D NOISE FUNCTIONS =============
+float hash3D(vec3 p) {
+  p = fract(p * 0.3183099 + 0.1);
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+
+// Higher quality 3D noise
+vec4 noised3D(vec3 x) {
+  vec3 i = floor(x);
+  vec3 f = fract(x);
+  vec3 u = f * f * (3.0 - 2.0 * f);
+  
+  float a = hash3D(i);
+  float b = hash3D(i + vec3(1.0, 0.0, 0.0));
+  float c = hash3D(i + vec3(0.0, 1.0, 0.0));
+  float d = hash3D(i + vec3(1.0, 1.0, 0.0));
+  float e = hash3D(i + vec3(0.0, 0.0, 1.0));
+  float f1 = hash3D(i + vec3(1.0, 0.0, 1.0));
+  float g = hash3D(i + vec3(0.0, 1.0, 1.0));
+  float h = hash3D(i + vec3(1.0, 1.0, 1.0));
+  
+  float k0 = a;
+  float k1 = b - a;
+  float k2 = c - a;
+  float k3 = e - a;
+  float k4 = a - b - c + d;
+  float k5 = a - c - e + g;
+  float k6 = a - b - e + f1;
+  float k7 = -a + b + c - d + e - f1 - g + h;
+  
+  float val = k0 + k1*u.x + k2*u.y + k3*u.z + k4*u.x*u.y + k5*u.y*u.z + k6*u.z*u.x + k7*u.x*u.y*u.z;
+  
+  return vec4(val, vec3(0.0));
+}
+
+// Enhanced FBM with more octaves for detailed clouds
+float fbmClouds(vec3 p, int octaves) {
+  float f = 0.0;
+  float a = 0.5;
+  float freq = 1.0;
+  
+  for (int i = 0; i < 8; i++) {
+    if (i >= octaves) break;
+    f += a * noised3D(p * freq).x;
+    freq *= 2.0;
+    a *= 0.5;
+  }
+  return f;
+}
+
+// Worley-like cellular noise for cumulus billowing
+float worleyNoise(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  
+  float minDist = 1.0;
+  for (int x = -1; x <= 1; x++) {
+    for (int y = -1; y <= 1; y++) {
+      for (int z = -1; z <= 1; z++) {
+        vec3 neighbor = vec3(float(x), float(y), float(z));
+        vec3 point = neighbor + hash3D(i + neighbor) - f;
+        minDist = min(minDist, dot(point, point));
+      }
+    }
+  }
+  return sqrt(minDist);
+}
 
 // ============= TERRAIN FUNCTIONS =============
 float hash2D(vec2 p) {
@@ -226,6 +312,28 @@ float fbmTerrain(vec2 p) {
   return f / 0.9375;
 }
 
+// ============= WATER WITH WAVES AND REFLECTIONS =============
+vec3 getWaterNormal(vec2 pos, float time) {
+  // Multiple wave layers for realistic ocean
+  vec2 wave1 = pos * 0.02 + vec2(time * 0.3, time * 0.1);
+  vec2 wave2 = pos * 0.05 + vec2(-time * 0.2, time * 0.15);
+  vec2 wave3 = pos * 0.1 + vec2(time * 0.1, -time * 0.25);
+  
+  float h1 = sin(wave1.x + wave1.y * 1.5) * 0.3;
+  float h2 = sin(wave2.x * 1.3 + wave2.y) * 0.2;
+  float h3 = sin(wave3.x + wave3.y * 0.8) * 0.1;
+  
+  // Compute normal from wave heights
+  float eps = 0.5;
+  float hL = sin((wave1.x - eps) + wave1.y * 1.5) * 0.3 + sin((wave2.x - eps) * 1.3 + wave2.y) * 0.2;
+  float hR = sin((wave1.x + eps) + wave1.y * 1.5) * 0.3 + sin((wave2.x + eps) * 1.3 + wave2.y) * 0.2;
+  float hD = sin(wave1.x + (wave1.y - eps) * 1.5) * 0.3 + sin(wave2.x * 1.3 + (wave2.y - eps)) * 0.2;
+  float hU = sin(wave1.x + (wave1.y + eps) * 1.5) * 0.3 + sin(wave2.x * 1.3 + (wave2.y + eps)) * 0.2;
+  
+  vec3 n = normalize(vec3(hL - hR, 2.0, hD - hU));
+  return n;
+}
+
 vec3 getTerrainColor(vec3 pos, vec3 nor, vec3 rd, vec3 sunDir, float dist, vec3 skyColor) {
   vec3 col;
   
@@ -234,16 +342,45 @@ vec3 getTerrainColor(vec3 pos, vec3 nor, vec3 rd, vec3 sunDir, float dist, vec3 
   float waterLevel = uWaterLevel * 0.2;
   float snowLevel = uSnowLevel;
   
-  // Water
+  // Water with animated waves and reflections
   if (pos.y < waterLevel * maxH) {
-    col = uWaterColor;
-    // Specular on water
+    // Get animated wave normal
+    vec3 waterNor = getWaterNormal(pos.xz, iTime);
+    
+    // Base water color with depth falloff
+    float depth = (waterLevel * maxH - pos.y) / (waterLevel * maxH);
+    col = mix(uWaterColor * 0.8, uWaterColor * 0.4, depth);
+    
+    // Fresnel reflection
+    float fresnel = pow(1.0 - max(dot(-rd, waterNor), 0.0), 4.0);
+    
+    // Reflected sky color
+    vec3 reflectDir = reflect(rd, waterNor);
+    float skyReflect = max(0.0, reflectDir.y * 0.5 + 0.5);
+    vec3 reflectedColor = mix(skyColor * 0.5, skyColor * 1.2, skyReflect);
+    
+    // Sun specular on waves
     vec3 hal = normalize(sunDir - rd);
-    float spec = pow(max(dot(vec3(0,1,0), hal), 0.0), 64.0);
-    col += spec * vec3(1.0, 0.9, 0.7) * 0.5;
-    // Add sky reflection to water
-    float fresnel = pow(1.0 - max(dot(-rd, vec3(0,1,0)), 0.0), 3.0);
-    col = mix(col, skyColor * 0.6, fresnel * 0.4);
+    float spec1 = pow(max(dot(waterNor, hal), 0.0), 128.0);
+    float spec2 = pow(max(dot(waterNor, hal), 0.0), 32.0);
+    vec3 specular = vec3(1.0, 0.95, 0.8) * (spec1 * 2.0 + spec2 * 0.5);
+    
+    // Wave foam at shoreline
+    float shorelineFoam = smoothstep(0.0, 0.02, waterLevel * maxH - pos.y);
+    float foamNoise = fbmTerrain(pos.xz * 0.1 + iTime * 0.5);
+    float foam = shorelineFoam * step(0.6, foamNoise) * 0.8;
+    
+    // Combine water effects
+    col = mix(col, reflectedColor, fresnel * 0.7);
+    col += specular;
+    col = mix(col, vec3(0.95, 0.98, 1.0), foam);
+    
+    // Storm darkening
+    col *= 1.0 - uStormDarkness * 0.4;
+    
+    // Lightning reflection on water
+    col += vec3(0.8, 0.85, 1.0) * uLightningIntensity * fresnel * 0.5;
+    
     return col;
   }
   
@@ -261,10 +398,16 @@ vec3 getTerrainColor(vec3 pos, vec3 nor, vec3 rd, vec3 sunDir, float dist, vec3 
   float snow = snowH * snowSlope;
   col = mix(col, uSnowColor, smoothstep(0.1, 0.9, snow));
   
+  // Rain darkening on surfaces
+  col *= 1.0 - uPrecipitation * 0.2;
+  
   // Lighting
   float amb = clamp(0.5 + 0.5 * nor.y, 0.0, 1.0);
   float dif = clamp(dot(sunDir, nor), 0.0, 1.0);
   float bac = clamp(0.2 + 0.8 * dot(normalize(vec3(-sunDir.x, 0.0, sunDir.z)), nor), 0.0, 1.0);
+  
+  // Storm reduces direct light
+  dif *= 1.0 - uStormDarkness * 0.6;
   
   float sh = dif >= 0.0001 ? terrainShadow(pos + sunDir * SC * 0.05, sunDir) : 1.0;
   
@@ -272,6 +415,10 @@ vec3 getTerrainColor(vec3 pos, vec3 nor, vec3 rd, vec3 sunDir, float dist, vec3 
   lin += dif * vec3(8.0, 5.0, 3.0) * 0.8 * vec3(sh, sh * sh * 0.5 + 0.5 * sh, sh * sh * 0.8 + 0.2 * sh);
   lin += amb * vec3(0.4, 0.6, 1.0) * 0.6;
   lin += bac * vec3(0.4, 0.5, 0.6) * 0.3;
+  
+  // Lightning flash illumination
+  lin += vec3(0.7, 0.75, 1.0) * uLightningIntensity * 3.0;
+  
   col *= lin;
   
   // Specular for snow
@@ -1015,6 +1162,23 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float disk = 1.0 - smoothstep(diskRadius, diskRadius * 1.15, dist01);
     skyColor += uLightColor * uSunDiskIntensity * disk;
     skyColor += uLightColor * uSunGlowIntensity * saturate(getGlow(1.0 - mu, diskRadius, 2.0));
+    
+    // Storm darkness - darken the sky
+    skyColor *= 1.0 - uStormDarkness * 0.6;
+  }
+  
+  // ============= LIGHTNING FLASH EFFECT =============
+  if (uLightningIntensity > 0.01) {
+    // Random lightning flashes based on time
+    float lightningTime = iTime * 8.0;
+    float flash1 = step(0.97, fract(lightningTime * 0.7 + 0.3));
+    float flash2 = step(0.985, fract(lightningTime * 1.1 + 0.7));
+    float flash3 = step(0.99, fract(lightningTime * 0.5 + 0.1));
+    float flashIntensity = (flash1 + flash2 * 1.5 + flash3 * 2.0) * uLightningIntensity;
+    
+    // Add bright flash to entire sky
+    vec3 lightningColor = vec3(0.7, 0.75, 1.0);
+    skyColor += lightningColor * flashIntensity * 2.0;
   }
 
   // ============= TERRAIN RENDERING =============
