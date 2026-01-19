@@ -226,7 +226,7 @@ float fbmTerrain(vec2 p) {
   return f / 0.9375;
 }
 
-vec3 getTerrainColor(vec3 pos, vec3 nor, vec3 rd, vec3 sunDir, float dist) {
+vec3 getTerrainColor(vec3 pos, vec3 nor, vec3 rd, vec3 sunDir, float dist, vec3 skyColor) {
   vec3 col;
   
   float maxH = SC * 120.0 * uTerrainScale * uTerrainHeight;
@@ -241,6 +241,9 @@ vec3 getTerrainColor(vec3 pos, vec3 nor, vec3 rd, vec3 sunDir, float dist) {
     vec3 hal = normalize(sunDir - rd);
     float spec = pow(max(dot(vec3(0,1,0), hal), 0.0), 64.0);
     col += spec * vec3(1.0, 0.9, 0.7) * 0.5;
+    // Add sky reflection to water
+    float fresnel = pow(1.0 - max(dot(-rd, vec3(0,1,0)), 0.0), 3.0);
+    col = mix(col, skyColor * 0.6, fresnel * 0.4);
     return col;
   }
   
@@ -276,12 +279,160 @@ vec3 getTerrainColor(vec3 pos, vec3 nor, vec3 rd, vec3 sunDir, float dist) {
   col += snow * 0.5 * pow(clamp(1.0 + dot(hal, rd), 0.0, 1.0), 5.0) *
          vec3(7.0, 5.0, 3.0) * dif * sh * pow(clamp(dot(nor, hal), 0.0, 1.0), 16.0);
   
-  // Distance fog
-  float fo = 1.0 - exp(-pow(0.0008 * dist / SC, 1.5));
-  vec3 fogCol = 0.65 * vec3(0.4, 0.65, 1.0);
-  col = mix(col, fogCol, fo);
+  // Valley fog - denser in low areas
+  float valleyFog = smoothstep(0.0, 0.3, 1.0 - h) * 0.6;
+  float fogNoise = fbmTerrain(pos.xz * 0.001 + iTime * 0.01);
+  valleyFog *= (0.5 + 0.5 * fogNoise);
+  col = mix(col, skyColor * 0.85, valleyFog);
+  
+  // Distance fog/haze that matches sky color for proper integration
+  float distFog = 1.0 - exp(-pow(0.0006 * dist / SC, 1.5));
+  col = mix(col, skyColor, distFog);
+  
+  // Atmospheric scattering (blue shift at distance)
+  float scatter = 1.0 - exp(-pow(0.0003 * dist / SC, 2.0));
+  col = mix(col, skyColor * 1.1, scatter * 0.3);
   
   return col;
+}
+
+// ============= MULTI-LAYER CLOUD SYSTEM =============
+// Get cloud density for cumulus (puffy, lower altitude)
+float getCumulusDensity(vec3 p, float baseHeight, float topHeight) {
+  if (p.y < baseHeight || p.y > topHeight) return 0.0;
+  
+  float heightFrac = (p.y - baseHeight) / (topHeight - baseHeight);
+  
+  // Cumulus has a flat base and rounded top
+  float baseProfile = smoothstep(0.0, 0.15, heightFrac);
+  float topProfile = 1.0 - pow(heightFrac, 0.5);
+  float profile = baseProfile * topProfile;
+  
+  // Wind offset
+  vec2 windOffset = vec2(cos(uWindDirection), sin(uWindDirection)) * uWindSpeed * iTime;
+  vec3 wp = p + vec3(windOffset.x, 0.0, windOffset.y);
+  
+  // Large billowing shapes
+  float shape = fbmClouds(wp * 0.002, 5);
+  shape = smoothstep(0.3 - uCloudCoverage * 0.2, 0.7, shape);
+  
+  // Add worley noise for billowing detail
+  float billows = 1.0 - worleyNoise(wp * 0.008);
+  shape *= mix(0.8, 1.2, billows);
+  
+  // Fine detail
+  float detail = fbmClouds(wp * 0.015 + vec3(iTime * 0.5), 4);
+  shape = saturate(remap(shape, detail * 0.3, 1.0, 0.0, 1.0));
+  
+  // Turbulence
+  float turb = fbmClouds(wp * 0.03 + vec3(iTime * 2.0), 3);
+  shape *= 1.0 + uTurbulence * (turb - 0.5) * 0.5;
+  
+  return shape * profile * 0.08;
+}
+
+// Get cloud density for stratus (flat, layered, mid altitude)
+float getStratusDensity(vec3 p, float baseHeight, float topHeight) {
+  if (p.y < baseHeight || p.y > topHeight) return 0.0;
+  
+  float heightFrac = (p.y - baseHeight) / (topHeight - baseHeight);
+  
+  // Stratus is relatively flat with some undulation
+  float profile = smoothstep(0.0, 0.2, heightFrac) * smoothstep(1.0, 0.7, heightFrac);
+  
+  vec2 windOffset = vec2(cos(uWindDirection), sin(uWindDirection)) * uWindSpeed * iTime * 0.7;
+  vec3 wp = p + vec3(windOffset.x, 0.0, windOffset.y);
+  
+  // Stretched horizontal noise for layered look
+  float shape = fbmClouds(vec3(wp.x * 0.001, wp.y * 0.005, wp.z * 0.001), 6);
+  shape = smoothstep(0.35 - uCloudCoverage * 0.15, 0.6, shape);
+  
+  // Less vertical variation
+  float detail = fbmClouds(wp * 0.01, 4);
+  shape = saturate(remap(shape, detail * 0.2, 1.0, 0.0, 1.0));
+  
+  return shape * profile * 0.05;
+}
+
+// Get cloud density for cirrus (wispy, high altitude)
+float getCirrusDensity(vec3 p, float baseHeight, float topHeight) {
+  if (p.y < baseHeight || p.y > topHeight) return 0.0;
+  
+  float heightFrac = (p.y - baseHeight) / (topHeight - baseHeight);
+  float profile = smoothstep(0.0, 0.3, heightFrac) * smoothstep(1.0, 0.5, heightFrac);
+  
+  vec2 windOffset = vec2(cos(uWindDirection), sin(uWindDirection)) * uWindSpeed * iTime * 1.5;
+  vec3 wp = p + vec3(windOffset.x, 0.0, windOffset.y);
+  
+  // Very stretched, wispy noise
+  float shape = fbmClouds(vec3(wp.x * 0.0005, wp.y * 0.02, wp.z * 0.0005), 7);
+  
+  // Fiber-like streaks
+  float streak = sin(wp.x * 0.002 + wp.z * 0.003 + iTime * 0.3) * 0.5 + 0.5;
+  shape *= 0.5 + 0.5 * streak;
+  
+  shape = smoothstep(0.4 - uCloudCoverage * 0.1, 0.65, shape);
+  
+  // Fine ice crystal detail
+  float ice = fbmClouds(wp * 0.05, 4);
+  shape *= 0.7 + 0.3 * ice;
+  
+  return shape * profile * 0.025;
+}
+
+// Combined multi-layer cloud density function
+float getMultiLayerCloudDensity(vec3 p, out float cloudHeight) {
+  cloudHeight = 0.0;
+  
+  // Layer boundaries based on cloud extent
+  float cumulusBase = CLOUD_LAYER_LOW * 0.8;
+  float cumulusTop = CLOUD_LAYER_LOW * 1.5;
+  float stratusBase = CLOUD_LAYER_MID * 0.9;
+  float stratusTop = CLOUD_LAYER_MID * 1.2;
+  float cirrusBase = CLOUD_LAYER_HIGH * 0.95;
+  float cirrusTop = CLOUD_EXTENT;
+  
+  float density = 0.0;
+  
+  // Blend between cloud types based on uCloudTypeBlend
+  float cumulusWeight = smoothstep(0.5, 0.0, uCloudTypeBlend);
+  float stratusWeight = 1.0 - abs(uCloudTypeBlend - 0.5) * 2.0;
+  float cirrusWeight = smoothstep(0.5, 1.0, uCloudTypeBlend);
+  
+  // Sample each layer
+  if (cumulusWeight > 0.01) {
+    float d = getCumulusDensity(p, cumulusBase, cumulusTop);
+    if (d > 0.0) {
+      cloudHeight = max(cloudHeight, (p.y - cumulusBase) / (cumulusTop - cumulusBase));
+    }
+    density += d * cumulusWeight;
+  }
+  
+  if (stratusWeight > 0.01) {
+    float d = getStratusDensity(p, stratusBase, stratusTop);
+    if (d > 0.0) {
+      cloudHeight = max(cloudHeight, 0.5);
+    }
+    density += d * stratusWeight;
+  }
+  
+  if (cirrusWeight > 0.01) {
+    float d = getCirrusDensity(p, cirrusBase, cirrusTop);
+    if (d > 0.0) {
+      cloudHeight = max(cloudHeight, 1.0);
+    }
+    density += d * cirrusWeight;
+  }
+  
+  // Edge fade for simulation bounds
+  float edge01 = max(abs(p.x), abs(p.z)) / CLOUD_EXTENT;
+  float edgeFade = 1.0 - smoothstep(0.85, 1.0, edge01);
+  density *= edgeFade;
+  
+  // Precipitation darkening
+  density *= 1.0 + uPrecipitation * 0.3;
+  
+  return density * uCloudDensity * 15.0;
 }
 
 vec3 rayDirection(float fieldOfView, vec2 fragCoord) {
@@ -839,11 +990,40 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
   float diskRadius = 0.5 * (1.0 - cos(atan(uCelestialSize / uCelestialDistance)));
 
+  // ============= SKY BACKGROUND (Calculate first for terrain fog blending) =============
+  vec3 skyColor = vec3(0.0);
+  if (uLightingMode == 0) {
+    // Get sky colour and stars.
+    skyColor = getSkyColour(rayDir, 0.05 * offset + mu);
+
+    if (mu > 0.85) {
+      bool covered = false;
+      vec3 moonColour = getMoon(vec3(0), rayDir, lightDirection, covered);
+      if (covered) {
+        skyColor = moonColour;
+      }
+    }
+
+    // Get the glow around the moon (without offsetting with blue noise).
+    skyColor += uLightColor * uSunGlowIntensity * saturate(getGlow(1.0 - mu, diskRadius, 2.0));
+  } else {
+    float t = saturate(rayDir.y * 0.5 + 0.5);
+    t = pow(t, 0.35);
+    skyColor = mix(uDaySkyHorizonColor, uDaySkyZenithColor, t);
+
+    float dist01 = 1.0 - mu;
+    float disk = 1.0 - smoothstep(diskRadius, diskRadius * 1.15, dist01);
+    skyColor += uLightColor * uSunDiskIntensity * disk;
+    skyColor += uLightColor * uSunGlowIntensity * saturate(getGlow(1.0 - mu, diskRadius, 2.0));
+  }
+
   // ============= TERRAIN RENDERING =============
   vec3 terrainColor = vec3(0.0);
   float terrainT = -1.0;
+  float terrainAlpha = 0.0;
   
-  if (uTerrainEnabled > 0.5 && rayDir.y < 0.3) {
+  // Extended rayDir.y threshold - allow terrain rendering for more of the view
+  if (uTerrainEnabled > 0.5 && rayDir.y < 0.5) {
     float tmax = 8000.0 * SC;
     float maxh = 250.0 * SC * uTerrainScale * uTerrainHeight;
     float tmin = 1.0;
@@ -860,41 +1040,21 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     if (terrainT < tmax - 1.0) {
       vec3 terrainPos = cameraPos + terrainT * rayDir;
       vec3 terrainNor = calcTerrainNormal(terrainPos, terrainT);
-      terrainColor = getTerrainColor(terrainPos, terrainNor, rayDir, lightDirection, terrainT);
+      // Pass sky color for proper atmospheric integration
+      terrainColor = getTerrainColor(terrainPos, terrainNor, rayDir, lightDirection, terrainT, skyColor);
+      terrainAlpha = 1.0;
+      
+      // Fade terrain to transparent at extreme distances (proper sky blend)
+      float distFade = 1.0 - exp(-pow(0.00015 * terrainT / SC, 2.0));
+      terrainAlpha = mix(1.0, 0.0, distFade);
+      terrainColor = mix(terrainColor, skyColor, distFade);
     }
-  }
-
-  // ============= SKY BACKGROUND =============
-  vec3 background = vec3(0.0);
-  if (uLightingMode == 0) {
-    // Get sky colour and stars.
-    // Offset mu with blue noise to get rid of bands in the haze gradient.
-    background = getSkyColour(rayDir, 0.05 * offset + mu);
-
-    if (mu > 0.85) {
-      bool covered = false;
-      vec3 moonColour = getMoon(vec3(0), rayDir, lightDirection, covered);
-      if (covered) {
-        background = moonColour;
-      }
-    }
-
-    // Get the glow around the moon (without offsetting with blue noise).
-    background += uLightColor * uSunGlowIntensity * saturate(getGlow(1.0 - mu, diskRadius, 2.0));
-  } else {
-    float t = saturate(rayDir.y * 0.5 + 0.5);
-    t = pow(t, 0.35);
-    background = mix(uDaySkyHorizonColor, uDaySkyZenithColor, t);
-
-    float dist01 = 1.0 - mu;
-    float disk = 1.0 - smoothstep(diskRadius, diskRadius * 1.15, dist01);
-    background += uLightColor * uSunDiskIntensity * disk;
-    background += uLightColor * uSunGlowIntensity * saturate(getGlow(1.0 - mu, diskRadius, 2.0));
   }
   
-  // Use terrain as background if it was hit
-  if (terrainT > 0.0) {
-    background = terrainColor;
+  // Determine background: blend terrain into sky properly
+  vec3 background = skyColor;
+  if (terrainAlpha > 0.0) {
+    background = mix(skyColor, terrainColor, terrainAlpha);
   }
 
   float totalTransmittance = 1.0;
