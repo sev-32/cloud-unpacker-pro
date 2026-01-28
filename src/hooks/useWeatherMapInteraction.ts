@@ -39,6 +39,7 @@ interface UseWeatherMapInteractionProps {
   onFrontComplete: (front: WeatherFront) => void;
   onPressureSystemAdd: (system: PressureSystem) => void;
   onWindDraw: (startX: number, startY: number, endX: number, endY: number) => void;
+  onBrushStroke?: () => void;
 }
 
 export function useWeatherMapInteraction({
@@ -57,6 +58,7 @@ export function useWeatherMapInteraction({
   onFrontComplete,
   onPressureSystemAdd,
   onWindDraw,
+  onBrushStroke,
 }: UseWeatherMapInteractionProps): WeatherMapInteraction {
   const [viewTransform, setViewTransform] = useState<ViewTransform>({
     offsetX: 0,
@@ -129,7 +131,9 @@ export function useWeatherMapInteraction({
         weatherManager.setAltitude(worldX, worldZ, baseAlt, topAlt, radius, falloff);
         break;
     }
-  }, [weatherManager, activeTool, brushSettings, selectedCloudType]);
+
+    onBrushStroke?.();
+  }, [weatherManager, activeTool, brushSettings, selectedCloudType, onBrushStroke]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const { worldX, worldZ } = canvasToWorld(e.clientX, e.clientY);

@@ -1,7 +1,7 @@
-import { CloudRenderer } from '@/components/CloudRenderer';
+import Landing from './Landing';
 
 const Index = () => {
-  return <CloudRenderer />;
+  return <Landing />;
 };
 
 export default Index;

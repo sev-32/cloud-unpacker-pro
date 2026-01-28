@@ -1,19 +1,31 @@
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useCloudRenderer } from '@/hooks/useCloudRenderer';
 import { ControlPanel } from './ControlPanel';
 import { FlightHUD } from './FlightHUD';
 import { WeatherMapEditor } from './WeatherMapEditor';
 import { FlightState } from '@/lib/flightPhysics';
 import { WeatherTextureManager } from '@/lib/weatherTextureManager';
-import { Map } from 'lucide-react';
+import { useWeather } from '@/contexts/WeatherContext';
+import { Map, Edit3, Home } from 'lucide-react';
 import { Button } from './ui/button';
 
 export function CloudRenderer() {
+  const navigate = useNavigate();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const { isReady, fps, settings, updateSettings, flightData, cameraPos, atmosphereData, setWeatherManager } = useCloudRenderer(canvasRef);
   const [showHUD, setShowHUD] = useState(true);
   const [showWeatherMap, setShowWeatherMap] = useState(false);
   const [isWeatherMapMaximized, setIsWeatherMapMaximized] = useState(false);
+
+  const { weatherManager: contextWeatherManager, currentMapId, currentMapMetadata } = useWeather();
+
+  useEffect(() => {
+    if (contextWeatherManager && isReady) {
+      setWeatherManager(contextWeatherManager);
+      updateSettings({ weatherMapEnabled: true });
+    }
+  }, [contextWeatherManager, isReady, setWeatherManager, updateSettings]);
 
   const handleWeatherManagerReady = useCallback((manager: WeatherTextureManager) => {
     setWeatherManager(manager);
@@ -25,8 +37,7 @@ export function CloudRenderer() {
     setIsWeatherMapMaximized(false);
     updateSettings({ weatherMapEnabled: false });
   }, [updateSettings]);
-  
-  // Create a flight state object from the renderer's flight data for the HUD
+
   const flightState: FlightState = {
     position: cameraPos as [number, number, number] || [-400, 700, 400],
     velocity: [flightData?.airspeed || 0, 0, 0],
@@ -62,18 +73,17 @@ export function CloudRenderer() {
         style={{ touchAction: 'none' }}
         tabIndex={0}
       />
-      
+
       {!isReady && (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="text-white/70 text-lg font-light">Loading shaders...</div>
         </div>
       )}
-      
-      {/* Flight HUD for fly/jet modes */}
+
       {isReady && (settings.cameraMode === 'jet' || settings.cameraMode === 'fly') && showHUD && (
         <FlightHUD state={flightState} visible={showHUD} />
       )}
-      
+
       {isReady && (
         <ControlPanel
           settings={settings}
@@ -84,8 +94,7 @@ export function CloudRenderer() {
           atmosphereData={atmosphereData}
         />
       )}
-      
-      {/* Mode indicator */}
+
       {isReady && (settings.cameraMode === 'fly' || settings.cameraMode === 'jet') && (
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 pointer-events-none">
           <div className="bg-black/60 backdrop-blur-sm rounded-lg px-4 py-2 text-center">
@@ -98,19 +107,50 @@ export function CloudRenderer() {
         </div>
       )}
 
-      {/* Weather Map Button */}
-      {isReady && !showWeatherMap && (
+      <div className="absolute top-4 left-4 flex items-center gap-2">
         <Button
-          onClick={() => setShowWeatherMap(true)}
-          className="absolute bottom-4 left-4 bg-slate-800/90 hover:bg-slate-700/90 border border-slate-600"
+          onClick={() => navigate('/')}
+          variant="outline"
           size="sm"
+          className="bg-slate-800/90 hover:bg-slate-700/90 border-slate-600 text-slate-300"
         >
-          <Map className="h-4 w-4 mr-2" />
-          Weather Map
+          <Home className="h-4 w-4 mr-2" />
+          Home
         </Button>
-      )}
 
-      {/* Weather Map Editor */}
+        {currentMapMetadata && (
+          <div className="bg-slate-800/90 rounded-md px-3 py-1.5 border border-slate-600">
+            <span className="text-xs text-slate-400">Weather: </span>
+            <span className="text-xs text-white">{currentMapMetadata.name}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="absolute bottom-4 left-4 flex items-center gap-2">
+        {isReady && !showWeatherMap && (
+          <>
+            <Button
+              onClick={() => setShowWeatherMap(true)}
+              className="bg-slate-800/90 hover:bg-slate-700/90 border border-slate-600"
+              size="sm"
+            >
+              <Map className="h-4 w-4 mr-2" />
+              Quick Edit
+            </Button>
+
+            <Button
+              onClick={() => navigate(currentMapId ? `/editor/${currentMapId}` : '/editor')}
+              variant="outline"
+              size="sm"
+              className="bg-emerald-600/90 hover:bg-emerald-500/90 border-emerald-500 text-white"
+            >
+              <Edit3 className="h-4 w-4 mr-2" />
+              Full Editor
+            </Button>
+          </>
+        )}
+      </div>
+
       {showWeatherMap && (
         <WeatherMapEditor
           onClose={handleCloseWeatherMap}

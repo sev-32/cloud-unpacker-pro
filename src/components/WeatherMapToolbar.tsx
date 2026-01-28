@@ -17,7 +17,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { WeatherFront, PressureSystem, HeatmapMode, CLOUD_TYPE_NAMES, FRONT_COLORS } from '../lib/weatherTypes';
-import { WEATHER_MAP_PRESETS } from '../lib/weatherMapPresets';
+import { WEATHER_MAP_PRESETS, getPresetsByCategory, WeatherMapPreset } from '../lib/weatherMapPresets';
 
 interface WeatherMapToolbarProps {
   activeTool: string;
@@ -79,6 +79,40 @@ const heatmapModes: { value: HeatmapMode; label: string }[] = [
   { value: 'moisture', label: 'Moisture' },
   { value: 'wind', label: 'Wind Speed' },
 ];
+
+function PresetCategory({
+  title,
+  presets,
+  onApply,
+}: {
+  title: string;
+  presets: WeatherMapPreset[];
+  onApply: (id: string) => void;
+}) {
+  if (presets.length === 0) return null;
+
+  return (
+    <div className="space-y-1">
+      <p className="text-xs text-slate-500 font-medium uppercase tracking-wide">{title}</p>
+      {presets.map(preset => (
+        <Button
+          key={preset.id}
+          variant="outline"
+          size="sm"
+          className="w-full justify-start h-auto py-1.5 px-2 text-left border-slate-700 hover:bg-slate-800"
+          onClick={() => onApply(preset.id)}
+        >
+          <div className="min-w-0">
+            <div className="text-xs font-medium truncate">{preset.name}</div>
+            {preset.region && (
+              <div className="text-[10px] text-slate-500">{preset.region}</div>
+            )}
+          </div>
+        </Button>
+      ))}
+    </div>
+  );
+}
 
 export function WeatherMapToolbar({
   activeTool,
@@ -410,29 +444,29 @@ export function WeatherMapToolbar({
 
         <Separator className="bg-slate-700" />
 
-        <Separator className="bg-slate-700" />
-
         <div className="space-y-3">
           <h3 className="text-sm font-semibold text-slate-200">
             <Sparkles className="h-4 w-4 inline mr-2" />
             Weather Presets
           </h3>
-          <div className="space-y-1">
-            {WEATHER_MAP_PRESETS.map(preset => (
-              <Button
-                key={preset.id}
-                variant="outline"
-                size="sm"
-                className="w-full justify-start h-auto py-2 text-left"
-                onClick={() => onApplyPreset(preset.id)}
-              >
-                <div>
-                  <div className="text-xs font-medium">{preset.name}</div>
-                  <div className="text-xs text-slate-400 font-normal">{preset.description}</div>
-                </div>
-              </Button>
-            ))}
-          </div>
+
+          <PresetCategory
+            title="Basic Patterns"
+            presets={getPresetsByCategory('basic')}
+            onApply={onApplyPreset}
+          />
+
+          <PresetCategory
+            title="Historical / Regional"
+            presets={getPresetsByCategory('historical')}
+            onApply={onApplyPreset}
+          />
+
+          <PresetCategory
+            title="Severe Weather"
+            presets={getPresetsByCategory('severe')}
+            onApply={onApplyPreset}
+          />
         </div>
 
         <Separator className="bg-slate-700" />
