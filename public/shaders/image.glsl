@@ -149,6 +149,15 @@ uniform float uLCLAltitude;         // meters - Lifting Condensation Level
 uniform float uCAPE;                // J/kg - Convective Available Potential Energy
 uniform float uAtmosphereEnabled;   // 0 or 1
 
+// Cloud layer type uniforms (Phase 2)
+uniform int uLowCloudType;       // 0=none, 1=cumulus, 2=stratus, 3=stratocumulus
+uniform int uMidCloudType;       // 0=none, 1=altostratus, 2=altocumulus
+uniform int uHighCloudType;      // 0=none, 1=cirrus, 2=cirrostratus, 3=cirrocumulus
+uniform float uLowCoverage;      // 0-1 coverage for low layer
+uniform float uMidCoverage;      // 0-1 coverage for mid layer
+uniform float uHighCoverage;     // 0-1 coverage for high layer
+uniform float uVerticalDevelopment; // 0-1 towering cumulus intensity
+
 // Cloud layer heights
 #define CLOUD_LAYER_LOW 200.0
 #define CLOUD_LAYER_MID 500.0
@@ -625,58 +634,309 @@ float getCirrusDensity(vec3 p, float baseHeight, float topHeight) {
   return shape * profile * humidityMod * 0.025;
 }
 
+// Stratocumulus - lumpy layer with cellular patterns
+float getStratocumulusDensity(vec3 p, float baseHeight, float topHeight) {
+  float atmosphericBase = getAtmosphericCloudBase();
+  float adjustedBase = mix(baseHeight, atmosphericBase, uAtmosphereEnabled);
+  float adjustedTop = adjustedBase + (topHeight - baseHeight);
+
+  float inversionInfluence = 0.0;
+  if (uAtmosphereEnabled > 0.5 && uInversionStrength > 0.0) {
+    float distToInversion = abs(p.y - uInversionAltitude);
+    inversionInfluence = exp(-distToInversion / 400.0) * uInversionStrength * 0.08;
+    adjustedTop = min(adjustedTop, uInversionAltitude + 200.0);
+  }
+
+  if (p.y < adjustedBase || p.y > adjustedTop) return 0.0;
+
+  float condensation = condensationProbability(p.y);
+  if (condensation < 0.01) return 0.0;
+
+  float heightFrac = (p.y - adjustedBase) / (adjustedTop - adjustedBase);
+  float profile = smoothstep(0.0, 0.15, heightFrac) * smoothstep(1.0, 0.6, heightFrac);
+
+  vec2 windOffset = vec2(cos(uWindDirection), sin(uWindDirection)) * uWindSpeed * iTime * 0.6;
+  vec3 wp = p + vec3(windOffset.x, 0.0, windOffset.y);
+
+  float cellular = 1.0 - worleyNoise(wp * 0.004);
+  cellular = smoothstep(0.2, 0.8, cellular);
+
+  float shape = fbmClouds(vec3(wp.x * 0.0015, wp.y * 0.004, wp.z * 0.0015), 5);
+  shape = smoothstep(0.3 - uLowCoverage * 0.2, 0.65, shape);
+  shape *= 0.6 + 0.4 * cellular;
+
+  float detail = fbmClouds(wp * 0.012, 4);
+  shape = saturate(remap(shape, detail * 0.25, 1.0, 0.0, 1.0));
+
+  shape *= (1.0 + inversionInfluence);
+
+  return shape * profile * condensation * 0.06;
+}
+
+// Altostratus - gray/blue mid-level sheet
+float getAltoststratusDensity(vec3 p, float baseHeight, float topHeight) {
+  if (p.y < baseHeight || p.y > topHeight) return 0.0;
+
+  float condensation = condensationProbability(p.y);
+  float humidityFactor = atmosphericHumidity(p.y);
+  if (uAtmosphereEnabled > 0.5 && humidityFactor < 0.3) {
+    condensation *= humidityFactor / 0.3;
+  }
+
+  float heightFrac = (p.y - baseHeight) / (topHeight - baseHeight);
+  float profile = smoothstep(0.0, 0.25, heightFrac) * smoothstep(1.0, 0.75, heightFrac);
+
+  vec2 windOffset = vec2(cos(uWindDirection), sin(uWindDirection)) * uWindSpeed * iTime * 0.5;
+  vec3 wp = p + vec3(windOffset.x, 0.0, windOffset.y);
+
+  float shape = fbmClouds(vec3(wp.x * 0.0004, wp.y * 0.006, wp.z * 0.0004), 4);
+  shape = smoothstep(0.25 - uMidCoverage * 0.15, 0.55, shape);
+
+  float undulation = sin(wp.x * 0.0008 + wp.z * 0.0006) * 0.5 + 0.5;
+  shape *= 0.8 + 0.2 * undulation;
+
+  float detail = fbmClouds(wp * 0.008, 3);
+  shape = saturate(remap(shape, detail * 0.15, 1.0, 0.0, 1.0));
+
+  return shape * profile * condensation * 0.04;
+}
+
+// Altocumulus - patchy mid-level clouds with wave patterns
+float getAltocumulusDensity(vec3 p, float baseHeight, float topHeight) {
+  if (p.y < baseHeight || p.y > topHeight) return 0.0;
+
+  float condensation = condensationProbability(p.y);
+  float humidityFactor = atmosphericHumidity(p.y);
+  if (uAtmosphereEnabled > 0.5 && humidityFactor < 0.25) {
+    condensation *= humidityFactor / 0.25;
+  }
+
+  float heightFrac = (p.y - baseHeight) / (topHeight - baseHeight);
+  float profile = smoothstep(0.0, 0.2, heightFrac) * smoothstep(1.0, 0.65, heightFrac);
+
+  vec2 windOffset = vec2(cos(uWindDirection), sin(uWindDirection)) * uWindSpeed * iTime * 0.7;
+  vec3 wp = p + vec3(windOffset.x, 0.0, windOffset.y);
+
+  float cellular = 1.0 - worleyNoise(wp * 0.005);
+  cellular = smoothstep(0.3, 0.75, cellular);
+
+  float wavePattern = sin(wp.x * 0.003 + wp.z * 0.002 + iTime * 0.2) * 0.5 + 0.5;
+
+  float shape = fbmClouds(vec3(wp.x * 0.001, wp.y * 0.004, wp.z * 0.001), 5);
+  shape = smoothstep(0.35 - uMidCoverage * 0.2, 0.65, shape);
+  shape *= 0.5 + 0.5 * cellular;
+  shape *= 0.7 + 0.3 * wavePattern;
+
+  float detail = fbmClouds(wp * 0.015, 4);
+  shape = saturate(remap(shape, detail * 0.2, 1.0, 0.0, 1.0));
+
+  return shape * profile * condensation * 0.045;
+}
+
+// Cirrostratus - thin ice crystal veil
+float getCirrostratsusDensity(vec3 p, float baseHeight, float topHeight) {
+  if (p.y < baseHeight || p.y > topHeight) return 0.0;
+
+  float highAltHumidity = atmosphericHumidity(p.y);
+  float cirrusThreshold = 0.12;
+  if (uAtmosphereEnabled > 0.5 && highAltHumidity < cirrusThreshold) {
+    float humidityFactor = highAltHumidity / cirrusThreshold;
+    if (humidityFactor < 0.2) return 0.0;
+  }
+
+  float heightFrac = (p.y - baseHeight) / (topHeight - baseHeight);
+  float profile = smoothstep(0.0, 0.4, heightFrac) * smoothstep(1.0, 0.6, heightFrac);
+
+  vec2 windOffset = vec2(cos(uWindDirection), sin(uWindDirection)) * uWindSpeed * iTime * 1.2;
+  vec3 wp = p + vec3(windOffset.x, 0.0, windOffset.y);
+
+  float shape = fbmClouds(vec3(wp.x * 0.00025, wp.y * 0.015, wp.z * 0.00025), 5);
+  shape = smoothstep(0.3 - uHighCoverage * 0.12, 0.55, shape);
+
+  float veil = fbmClouds(wp * 0.001, 3);
+  shape *= 0.6 + 0.4 * veil;
+
+  float humidityMod = uAtmosphereEnabled > 0.5 ? (highAltHumidity / 0.35) : 1.0;
+  humidityMod = clamp(humidityMod, 0.2, 1.3);
+
+  return shape * profile * humidityMod * 0.015;
+}
+
+// Cirrocumulus - small high-altitude ripples
+float getCirrocumulusDensity(vec3 p, float baseHeight, float topHeight) {
+  if (p.y < baseHeight || p.y > topHeight) return 0.0;
+
+  float highAltHumidity = atmosphericHumidity(p.y);
+  float cirrusThreshold = 0.18;
+  if (uAtmosphereEnabled > 0.5 && highAltHumidity < cirrusThreshold) {
+    float humidityFactor = highAltHumidity / cirrusThreshold;
+    if (humidityFactor < 0.25) return 0.0;
+  }
+
+  float heightFrac = (p.y - baseHeight) / (topHeight - baseHeight);
+  float profile = smoothstep(0.0, 0.25, heightFrac) * smoothstep(1.0, 0.55, heightFrac);
+
+  vec2 windOffset = vec2(cos(uWindDirection), sin(uWindDirection)) * uWindSpeed * iTime * 1.3;
+  vec3 wp = p + vec3(windOffset.x, 0.0, windOffset.y);
+
+  float cellular = 1.0 - worleyNoise(wp * 0.007);
+  cellular = smoothstep(0.35, 0.8, cellular);
+
+  float shape = fbmClouds(vec3(wp.x * 0.0006, wp.y * 0.02, wp.z * 0.0006), 4);
+  shape = smoothstep(0.4 - uHighCoverage * 0.15, 0.65, shape);
+  shape *= 0.4 + 0.6 * cellular;
+
+  float ripple = sin(wp.x * 0.005 + wp.z * 0.004) * sin(wp.z * 0.006 - wp.x * 0.003);
+  shape *= 0.7 + 0.3 * (ripple * 0.5 + 0.5);
+
+  float humidityMod = uAtmosphereEnabled > 0.5 ? (highAltHumidity / 0.4) : 1.0;
+  humidityMod = clamp(humidityMod, 0.3, 1.4);
+
+  return shape * profile * humidityMod * 0.02;
+}
+
+// Towering Cumulus - vertically developing convective clouds
+float getToweringCumulusDensity(vec3 p, float baseHeight, float topHeight) {
+  float atmosphericBase = getAtmosphericCloudBase();
+  float adjustedBase = mix(baseHeight, atmosphericBase, uAtmosphereEnabled);
+
+  float verticalExtent = (topHeight - baseHeight) * (1.0 + uVerticalDevelopment * 2.0);
+  float convectiveExtent = convectiveBoost(p.y);
+  verticalExtent *= convectiveExtent;
+
+  float adjustedTop = adjustedBase + verticalExtent;
+
+  if (p.y < adjustedBase || p.y > adjustedTop) return 0.0;
+
+  float condensation = condensationProbability(p.y);
+  if (condensation < 0.01) return 0.0;
+
+  float heightFrac = (p.y - adjustedBase) / (adjustedTop - adjustedBase);
+
+  float baseProfile = smoothstep(0.0, 0.1, heightFrac);
+  float midBulge = 1.0 + 0.3 * sin(heightFrac * 3.14159);
+  float topProfile = pow(1.0 - heightFrac, 0.3);
+  float profile = baseProfile * topProfile * midBulge;
+
+  vec2 windOffset = vec2(cos(uWindDirection), sin(uWindDirection)) * uWindSpeed * iTime * 0.4;
+  vec3 wp = p + vec3(windOffset.x, 0.0, windOffset.y);
+
+  float shape = fbmClouds(vec3(wp.x * 0.0012, wp.y * 0.0008, wp.z * 0.0012), 6);
+  shape = smoothstep(0.35 - uLowCoverage * 0.15, 0.65, shape);
+
+  float billows = 1.0 - worleyNoise(wp * 0.006);
+  float cauliflower = 1.0 - worleyNoise(wp * 0.015);
+  shape *= mix(0.7, 1.3, billows);
+  shape *= 0.8 + 0.4 * cauliflower * heightFrac;
+
+  float detail = fbmClouds(wp * 0.02 + vec3(iTime * 0.8), 5);
+  shape = saturate(remap(shape, detail * 0.25, 1.0, 0.0, 1.0));
+
+  float turb = fbmClouds(wp * 0.04 + vec3(iTime * 3.0), 4);
+  shape *= 1.0 + uTurbulence * (turb - 0.5) * 0.6;
+
+  float instabilityBoost = 1.0 + uInstabilityIndex * 0.5;
+  shape *= instabilityBoost * convectiveExtent;
+
+  return shape * profile * condensation * 0.1;
+}
+
+// Sample low layer cloud based on type
+float sampleLowLayer(vec3 p, float baseHeight, float topHeight) {
+  if (uLowCloudType == 0) return 0.0;
+  if (uLowCoverage < 0.01) return 0.0;
+
+  float d = 0.0;
+  if (uLowCloudType == 1) {
+    d = getCumulusDensity(p, baseHeight, topHeight);
+  } else if (uLowCloudType == 2) {
+    d = getStratusDensity(p, baseHeight, topHeight);
+  } else if (uLowCloudType == 3) {
+    d = getStratocumulusDensity(p, baseHeight, topHeight);
+  }
+
+  return d * uLowCoverage;
+}
+
+// Sample mid layer cloud based on type
+float sampleMidLayer(vec3 p, float baseHeight, float topHeight) {
+  if (uMidCloudType == 0) return 0.0;
+  if (uMidCoverage < 0.01) return 0.0;
+
+  float d = 0.0;
+  if (uMidCloudType == 1) {
+    d = getAltoststratusDensity(p, baseHeight, topHeight);
+  } else if (uMidCloudType == 2) {
+    d = getAltocumulusDensity(p, baseHeight, topHeight);
+  }
+
+  return d * uMidCoverage;
+}
+
+// Sample high layer cloud based on type
+float sampleHighLayer(vec3 p, float baseHeight, float topHeight) {
+  if (uHighCloudType == 0) return 0.0;
+  if (uHighCoverage < 0.01) return 0.0;
+
+  float d = 0.0;
+  if (uHighCloudType == 1) {
+    d = getCirrusDensity(p, baseHeight, topHeight);
+  } else if (uHighCloudType == 2) {
+    d = getCirrostratsusDensity(p, baseHeight, topHeight);
+  } else if (uHighCloudType == 3) {
+    d = getCirrocumulusDensity(p, baseHeight, topHeight);
+  }
+
+  return d * uHighCoverage;
+}
+
 // Combined multi-layer cloud density function
 float getMultiLayerCloudDensity(vec3 p, out float cloudHeight) {
   cloudHeight = 0.0;
-  
-  // Layer boundaries based on cloud extent
-  float cumulusBase = CLOUD_LAYER_LOW * 0.8;
-  float cumulusTop = CLOUD_LAYER_LOW * 1.5;
-  float stratusBase = CLOUD_LAYER_MID * 0.9;
-  float stratusTop = CLOUD_LAYER_MID * 1.2;
-  float cirrusBase = CLOUD_LAYER_HIGH * 0.95;
-  float cirrusTop = CLOUD_EXTENT;
-  
+
+  float lowBase = CLOUD_LAYER_LOW * 0.7;
+  float lowTop = CLOUD_LAYER_LOW * 1.8;
+  float midBase = CLOUD_LAYER_MID * 0.85;
+  float midTop = CLOUD_LAYER_MID * 1.4;
+  float highBase = CLOUD_LAYER_HIGH * 0.9;
+  float highTop = CLOUD_EXTENT;
+
   float density = 0.0;
-  
-  // Blend between cloud types based on uCloudTypeBlend
-  float cumulusWeight = smoothstep(0.5, 0.0, uCloudTypeBlend);
-  float stratusWeight = 1.0 - abs(uCloudTypeBlend - 0.5) * 2.0;
-  float cirrusWeight = smoothstep(0.5, 1.0, uCloudTypeBlend);
-  
-  // Sample each layer
-  if (cumulusWeight > 0.01) {
-    float d = getCumulusDensity(p, cumulusBase, cumulusTop);
-    if (d > 0.0) {
-      cloudHeight = max(cloudHeight, (p.y - cumulusBase) / (cumulusTop - cumulusBase));
-    }
-    density += d * cumulusWeight;
+
+  float lowD = sampleLowLayer(p, lowBase, lowTop);
+  if (lowD > 0.0) {
+    cloudHeight = max(cloudHeight, (p.y - lowBase) / (lowTop - lowBase) * 0.33);
+    density += lowD;
   }
-  
-  if (stratusWeight > 0.01) {
-    float d = getStratusDensity(p, stratusBase, stratusTop);
-    if (d > 0.0) {
-      cloudHeight = max(cloudHeight, 0.5);
+
+  if (uVerticalDevelopment > 0.01 && uLowCloudType == 1) {
+    float towerBase = lowBase;
+    float towerTop = lowBase + (midTop - lowBase) * (1.0 + uVerticalDevelopment);
+    float towerD = getToweringCumulusDensity(p, towerBase, towerTop) * uVerticalDevelopment * uLowCoverage;
+    if (towerD > 0.0) {
+      cloudHeight = max(cloudHeight, (p.y - towerBase) / (towerTop - towerBase) * 0.6);
+      density += towerD;
     }
-    density += d * stratusWeight;
   }
-  
-  if (cirrusWeight > 0.01) {
-    float d = getCirrusDensity(p, cirrusBase, cirrusTop);
-    if (d > 0.0) {
-      cloudHeight = max(cloudHeight, 1.0);
-    }
-    density += d * cirrusWeight;
+
+  float midD = sampleMidLayer(p, midBase, midTop);
+  if (midD > 0.0) {
+    cloudHeight = max(cloudHeight, 0.5 + (p.y - midBase) / (midTop - midBase) * 0.17);
+    density += midD;
   }
-  
-  // Edge fade for simulation bounds
+
+  float highD = sampleHighLayer(p, highBase, highTop);
+  if (highD > 0.0) {
+    cloudHeight = max(cloudHeight, 0.75 + (p.y - highBase) / (highTop - highBase) * 0.25);
+    density += highD;
+  }
+
   float edge01 = max(abs(p.x), abs(p.z)) / CLOUD_EXTENT;
   float edgeFade = 1.0 - smoothstep(0.85, 1.0, edge01);
   density *= edgeFade;
-  
-  // Precipitation darkening
+
   density *= 1.0 + uPrecipitation * 0.3;
-  
+
   return density * uCloudDensity * 15.0;
 }
 

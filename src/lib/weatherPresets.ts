@@ -5,6 +5,21 @@ import {
   ATMOSPHERIC_CONSTANTS,
   createDefaultAtmosphericProfile,
 } from './atmosphericTypes';
+import {
+  LowCloudType,
+  MidCloudType,
+  HighCloudType,
+} from './cloudTypes';
+
+export interface CloudLayerConfig {
+  lowType: LowCloudType;
+  midType: MidCloudType;
+  highType: HighCloudType;
+  lowCoverage: number;
+  midCoverage: number;
+  highCoverage: number;
+  verticalDevelopment: number;
+}
 
 export interface WeatherPreset {
   id: string;
@@ -17,6 +32,7 @@ export interface WeatherPreset {
     typeBlend: number;
     density: number;
   };
+  cloudLayers: CloudLayerConfig;
   visualSettings: {
     precipitation: number;
     lightning: number;
@@ -51,6 +67,15 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
       typeBlend: 0.0,
       density: 0.05,
     },
+    cloudLayers: {
+      lowType: 'cumulus',
+      midType: 'none',
+      highType: 'none',
+      lowCoverage: 0.1,
+      midCoverage: 0.0,
+      highCoverage: 0.0,
+      verticalDevelopment: 0.0,
+    },
     visualSettings: {
       precipitation: 0,
       lightning: 0,
@@ -83,6 +108,15 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
       coverage: 0.35,
       typeBlend: 0.15,
       density: 0.075,
+    },
+    cloudLayers: {
+      lowType: 'cumulus',
+      midType: 'none',
+      highType: 'cirrus',
+      lowCoverage: 0.35,
+      midCoverage: 0.0,
+      highCoverage: 0.2,
+      verticalDevelopment: 0.0,
     },
     visualSettings: {
       precipitation: 0,
@@ -117,6 +151,15 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
       typeBlend: 0.5,
       density: 0.06,
     },
+    cloudLayers: {
+      lowType: 'stratus',
+      midType: 'none',
+      highType: 'none',
+      lowCoverage: 0.9,
+      midCoverage: 0.0,
+      highCoverage: 0.0,
+      verticalDevelopment: 0.0,
+    },
     visualSettings: {
       precipitation: 0.1,
       lightning: 0,
@@ -149,6 +192,15 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
       coverage: 0.4,
       typeBlend: 1.0,
       density: 0.03,
+    },
+    cloudLayers: {
+      lowType: 'none',
+      midType: 'none',
+      highType: 'cirrus',
+      lowCoverage: 0.0,
+      midCoverage: 0.0,
+      highCoverage: 0.5,
+      verticalDevelopment: 0.0,
     },
     visualSettings: {
       precipitation: 0,
@@ -183,6 +235,15 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
       typeBlend: 0.1,
       density: 0.09,
     },
+    cloudLayers: {
+      lowType: 'cumulus',
+      midType: 'none',
+      highType: 'cirrus',
+      lowCoverage: 0.5,
+      midCoverage: 0.0,
+      highCoverage: 0.3,
+      verticalDevelopment: 0.5,
+    },
     visualSettings: {
       precipitation: 0,
       lightning: 0,
@@ -215,6 +276,15 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
       coverage: 0.7,
       typeBlend: 0.2,
       density: 0.1,
+    },
+    cloudLayers: {
+      lowType: 'cumulus',
+      midType: 'altostratus',
+      highType: 'cirrus',
+      lowCoverage: 0.6,
+      midCoverage: 0.4,
+      highCoverage: 0.5,
+      verticalDevelopment: 0.7,
     },
     visualSettings: {
       precipitation: 0.2,
@@ -249,6 +319,15 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
       typeBlend: 0.15,
       density: 0.12,
     },
+    cloudLayers: {
+      lowType: 'cumulus',
+      midType: 'altostratus',
+      highType: 'cirrostratus',
+      lowCoverage: 0.9,
+      midCoverage: 0.7,
+      highCoverage: 0.5,
+      verticalDevelopment: 1.0,
+    },
     visualSettings: {
       precipitation: 0.8,
       lightning: 0.8,
@@ -281,6 +360,15 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
       coverage: 1.0,
       typeBlend: 0.5,
       density: 0.04,
+    },
+    cloudLayers: {
+      lowType: 'stratus',
+      midType: 'none',
+      highType: 'none',
+      lowCoverage: 1.0,
+      midCoverage: 0.0,
+      highCoverage: 0.0,
+      verticalDevelopment: 0.0,
     },
     visualSettings: {
       precipitation: 0,
@@ -315,6 +403,15 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
       typeBlend: 0.6,
       density: 0.05,
     },
+    cloudLayers: {
+      lowType: 'stratocumulus',
+      midType: 'altostratus',
+      highType: 'cirrostratus',
+      lowCoverage: 0.5,
+      midCoverage: 0.3,
+      highCoverage: 0.4,
+      verticalDevelopment: 0.0,
+    },
     visualSettings: {
       precipitation: 0.15,
       lightning: 0,
@@ -347,6 +444,15 @@ export const WEATHER_PRESETS: Record<string, WeatherPreset> = {
       coverage: 0.45,
       typeBlend: 0.2,
       density: 0.08,
+    },
+    cloudLayers: {
+      lowType: 'cumulus',
+      midType: 'altocumulus',
+      highType: 'cirrus',
+      lowCoverage: 0.45,
+      midCoverage: 0.2,
+      highCoverage: 0.3,
+      verticalDevelopment: 0.3,
     },
     visualSettings: {
       precipitation: 0.05,
@@ -403,7 +509,12 @@ export function interpolatePresets(
   from: WeatherPreset,
   to: WeatherPreset,
   t: number
-): { profile: AtmosphericProfile; clouds: WeatherPreset['cloudSettings']; visual: WeatherPreset['visualSettings'] } {
+): {
+  profile: AtmosphericProfile;
+  clouds: WeatherPreset['cloudSettings'];
+  cloudLayers: CloudLayerConfig;
+  visual: WeatherPreset['visualSettings'];
+} {
   const lerp = (a: number, b: number) => a + (b - a) * t;
 
   return {
@@ -412,6 +523,15 @@ export function interpolatePresets(
       coverage: lerp(from.cloudSettings.coverage, to.cloudSettings.coverage),
       typeBlend: lerp(from.cloudSettings.typeBlend, to.cloudSettings.typeBlend),
       density: lerp(from.cloudSettings.density, to.cloudSettings.density),
+    },
+    cloudLayers: {
+      lowType: t < 0.5 ? from.cloudLayers.lowType : to.cloudLayers.lowType,
+      midType: t < 0.5 ? from.cloudLayers.midType : to.cloudLayers.midType,
+      highType: t < 0.5 ? from.cloudLayers.highType : to.cloudLayers.highType,
+      lowCoverage: lerp(from.cloudLayers.lowCoverage, to.cloudLayers.lowCoverage),
+      midCoverage: lerp(from.cloudLayers.midCoverage, to.cloudLayers.midCoverage),
+      highCoverage: lerp(from.cloudLayers.highCoverage, to.cloudLayers.highCoverage),
+      verticalDevelopment: lerp(from.cloudLayers.verticalDevelopment, to.cloudLayers.verticalDevelopment),
     },
     visual: {
       precipitation: lerp(from.visualSettings.precipitation, to.visualSettings.precipitation),
@@ -426,6 +546,7 @@ export function createCustomPreset(
   name: string,
   profile: AtmosphericProfile,
   clouds: WeatherPreset['cloudSettings'],
+  cloudLayers: CloudLayerConfig,
   visual: WeatherPreset['visualSettings']
 ): WeatherPreset {
   return {
@@ -435,6 +556,7 @@ export function createCustomPreset(
     category: 'custom',
     atmosphericProfile: profile,
     cloudSettings: clouds,
+    cloudLayers,
     visualSettings: visual,
   };
 }

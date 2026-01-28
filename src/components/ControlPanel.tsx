@@ -3,10 +3,19 @@ import { CloudSettings } from '@/hooks/useCloudRenderer';
 import {
   ChevronDown, ChevronUp, Settings, Sun, Moon, Cloud,
   Sparkles, Mountain, Plane, Eye, EyeOff, Droplets, Wind, CloudLightning,
-  Thermometer
+  Thermometer, Layers
 } from 'lucide-react';
 import { WEATHER_PRESETS, WeatherPreset } from '@/lib/weatherPresets';
 import { kelvinToCelsius } from '@/lib/atmosphericTypes';
+import {
+  LowCloudType,
+  MidCloudType,
+  HighCloudType,
+  LOW_CLOUD_TYPES,
+  MID_CLOUD_TYPES,
+  HIGH_CLOUD_TYPES,
+  CLOUD_LAYER_PRESETS,
+} from '@/lib/cloudTypes';
 
 interface AtmosphereData {
   lcl: number;
@@ -126,6 +135,7 @@ export function ControlPanel({ settings, onUpdate, fps, onToggleHUD, showHUD, at
     if (!preset) return;
 
     const profile = preset.atmosphericProfile;
+    const layers = preset.cloudLayers;
     onUpdate({
       activeWeatherPreset: presetId,
       surfaceTemperature: kelvinToCelsius(profile.surfaceConditions.temperature),
@@ -139,6 +149,13 @@ export function ControlPanel({ settings, onUpdate, fps, onToggleHUD, showHUD, at
       cloudCoverage: preset.cloudSettings.coverage,
       cloudType: preset.cloudSettings.typeBlend,
       densityMultiplier: preset.cloudSettings.density,
+      lowCloudType: layers.lowType,
+      midCloudType: layers.midType,
+      highCloudType: layers.highType,
+      lowCoverage: layers.lowCoverage,
+      midCoverage: layers.midCoverage,
+      highCoverage: layers.highCoverage,
+      verticalDevelopment: layers.verticalDevelopment,
       precipitation: preset.visualSettings.precipitation,
       lightningIntensity: preset.visualSettings.lightning,
       stormDarkness: preset.visualSettings.stormDarkness,
@@ -403,6 +420,146 @@ export function ControlPanel({ settings, onUpdate, fps, onToggleHUD, showHUD, at
                 step={0.05}
                 onChange={(v) => onUpdate({ cloudThickness01: v })}
               />
+            </Section>
+
+            {/* Cloud Layers */}
+            <Section title="Cloud Layers" icon={<Layers size={14} />}>
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {CLOUD_LAYER_PRESETS.slice(0, 4).map((preset) => (
+                    <button
+                      key={preset.name}
+                      onClick={() => onUpdate({
+                        lowCloudType: preset.settings.lowType,
+                        midCloudType: preset.settings.midType,
+                        highCloudType: preset.settings.highType,
+                        lowCoverage: preset.settings.lowCoverage,
+                        midCoverage: preset.settings.midCoverage,
+                        highCoverage: preset.settings.highCoverage,
+                        verticalDevelopment: preset.settings.verticalDevelopment,
+                      })}
+                      className="px-2 py-1 text-[10px] rounded bg-white/10 border border-white/10
+                        text-white/60 hover:text-white hover:bg-white/20 transition-colors"
+                    >
+                      {preset.name}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-xs text-white/70 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-green-400/70"></span>
+                    Low Layer (0-2km)
+                  </div>
+                  <div className="flex gap-1">
+                    {(['none', 'cumulus', 'stratus', 'stratocumulus'] as LowCloudType[]).map((type) => (
+                      <button
+                        key={type}
+                        onClick={() => onUpdate({ lowCloudType: type })}
+                        className={`flex-1 py-1 px-1 text-[10px] rounded transition-colors ${
+                          settings.lowCloudType === type
+                            ? 'bg-green-500/30 border border-green-400/50 text-green-200'
+                            : 'bg-white/10 border border-white/10 text-white/60 hover:text-white'
+                        }`}
+                      >
+                        {type === 'none' ? 'None' : type === 'stratocumulus' ? 'Sc' : type.charAt(0).toUpperCase() + type.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                  {settings.lowCloudType !== 'none' && (
+                    <Slider
+                      label="Low Coverage"
+                      value={settings.lowCoverage}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      onChange={(v) => onUpdate({ lowCoverage: v })}
+                      format={(v) => `${Math.round(v * 100)}%`}
+                    />
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-xs text-white/70 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-yellow-400/70"></span>
+                    Mid Layer (2-6km)
+                  </div>
+                  <div className="flex gap-1">
+                    {(['none', 'altostratus', 'altocumulus'] as MidCloudType[]).map((type) => (
+                      <button
+                        key={type}
+                        onClick={() => onUpdate({ midCloudType: type })}
+                        className={`flex-1 py-1 px-1 text-[10px] rounded transition-colors ${
+                          settings.midCloudType === type
+                            ? 'bg-yellow-500/30 border border-yellow-400/50 text-yellow-200'
+                            : 'bg-white/10 border border-white/10 text-white/60 hover:text-white'
+                        }`}
+                      >
+                        {type === 'none' ? 'None' : type === 'altostratus' ? 'As' : 'Ac'}
+                      </button>
+                    ))}
+                  </div>
+                  {settings.midCloudType !== 'none' && (
+                    <Slider
+                      label="Mid Coverage"
+                      value={settings.midCoverage}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      onChange={(v) => onUpdate({ midCoverage: v })}
+                      format={(v) => `${Math.round(v * 100)}%`}
+                    />
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-xs text-white/70 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-blue-400/70"></span>
+                    High Layer (6-12km)
+                  </div>
+                  <div className="flex gap-1">
+                    {(['none', 'cirrus', 'cirrostratus', 'cirrocumulus'] as HighCloudType[]).map((type) => (
+                      <button
+                        key={type}
+                        onClick={() => onUpdate({ highCloudType: type })}
+                        className={`flex-1 py-1 px-1 text-[10px] rounded transition-colors ${
+                          settings.highCloudType === type
+                            ? 'bg-blue-500/30 border border-blue-400/50 text-blue-200'
+                            : 'bg-white/10 border border-white/10 text-white/60 hover:text-white'
+                        }`}
+                      >
+                        {type === 'none' ? 'None' : type === 'cirrus' ? 'Ci' : type === 'cirrostratus' ? 'Cs' : 'Cc'}
+                      </button>
+                    ))}
+                  </div>
+                  {settings.highCloudType !== 'none' && (
+                    <Slider
+                      label="High Coverage"
+                      value={settings.highCoverage}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      onChange={(v) => onUpdate({ highCoverage: v })}
+                      format={(v) => `${Math.round(v * 100)}%`}
+                    />
+                  )}
+                </div>
+
+                {settings.lowCloudType === 'cumulus' && (
+                  <div className="space-y-2 pt-2 border-t border-white/10">
+                    <div className="text-xs text-white/70">Vertical Development</div>
+                    <Slider
+                      label="Towering"
+                      value={settings.verticalDevelopment}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      onChange={(v) => onUpdate({ verticalDevelopment: v })}
+                      format={(v) => v < 0.3 ? 'Flat' : v < 0.7 ? 'Building' : 'Towering'}
+                    />
+                  </div>
+                )}
+              </div>
             </Section>
 
             {/* Clouds - Dynamics */}

@@ -2,6 +2,15 @@ import { useRef, useEffect, useCallback, useState } from 'react';
 import { AtmosphericSimulation, createAtmosphericSimulation } from '../lib/atmosphericSimulation';
 import { kelvinToCelsius, celsiusToKelvin } from '../lib/atmosphericTypes';
 import { WEATHER_PRESETS, WeatherPreset, interpolatePresets } from '../lib/weatherPresets';
+import {
+  LowCloudType,
+  MidCloudType,
+  HighCloudType,
+  LOW_TYPE_TO_INDEX,
+  MID_TYPE_TO_INDEX,
+  HIGH_TYPE_TO_INDEX,
+  DEFAULT_CLOUD_LAYER_SETTINGS,
+} from '../lib/cloudTypes';
 
 export interface CloudSettings {
   // Render
@@ -62,6 +71,15 @@ export interface CloudSettings {
   windDirection: number;
   turbulence: number;
   precipitation: number;
+
+  // Cloud layer types (Phase 2)
+  lowCloudType: LowCloudType;
+  midCloudType: MidCloudType;
+  highCloudType: HighCloudType;
+  lowCoverage: number;
+  midCoverage: number;
+  highCoverage: number;
+  verticalDevelopment: number;
   
   // Weather / Thunderstorm
   lightningIntensity: number;
@@ -152,11 +170,20 @@ export const DEFAULT_SETTINGS: CloudSettings = {
   
   // Cloud dynamics
   cloudCoverage: 0.5,
-  cloudType: 0.3, // Slightly towards cumulus by default
+  cloudType: 0.3,
   windSpeed: 10,
   windDirection: 45,
   turbulence: 0.3,
   precipitation: 0,
+
+  // Cloud layer types (Phase 2)
+  lowCloudType: DEFAULT_CLOUD_LAYER_SETTINGS.lowType,
+  midCloudType: DEFAULT_CLOUD_LAYER_SETTINGS.midType,
+  highCloudType: DEFAULT_CLOUD_LAYER_SETTINGS.highType,
+  lowCoverage: DEFAULT_CLOUD_LAYER_SETTINGS.lowCoverage,
+  midCoverage: DEFAULT_CLOUD_LAYER_SETTINGS.midCoverage,
+  highCoverage: DEFAULT_CLOUD_LAYER_SETTINGS.highCoverage,
+  verticalDevelopment: DEFAULT_CLOUD_LAYER_SETTINGS.verticalDevelopment,
   
   // Weather
   lightningIntensity: 0,
@@ -670,6 +697,9 @@ void main() {
         // Multi-layer cloud and weather uniforms
         'uCloudCoverage', 'uCloudTypeBlend', 'uWindSpeed', 'uWindDirection',
         'uTurbulence', 'uPrecipitation', 'uLightningIntensity', 'uStormDarkness',
+        // Cloud layer type uniforms (Phase 2)
+        'uLowCloudType', 'uMidCloudType', 'uHighCloudType',
+        'uLowCoverage', 'uMidCoverage', 'uHighCoverage', 'uVerticalDevelopment',
         // Atmospheric uniforms (Phase 1)
         'uSurfaceTemperature', 'uSurfacePressure', 'uSurfaceHumidity',
         'uLapseRate', 'uInversionAltitude', 'uInversionStrength',
@@ -1150,12 +1180,21 @@ void main() {
         // Multi-layer cloud and weather uniforms
         if (u.uCloudCoverage) gl.uniform1f(u.uCloudCoverage, s.cloudCoverage);
         if (u.uCloudTypeBlend) gl.uniform1f(u.uCloudTypeBlend, s.cloudType);
-        if (u.uWindSpeed) gl.uniform1f(u.uWindSpeed, s.windSpeed * 0.001); // Scale for shader
-        if (u.uWindDirection) gl.uniform1f(u.uWindDirection, s.windDirection * Math.PI / 180); // Convert to radians
+        if (u.uWindSpeed) gl.uniform1f(u.uWindSpeed, s.windSpeed * 0.001);
+        if (u.uWindDirection) gl.uniform1f(u.uWindDirection, s.windDirection * Math.PI / 180);
         if (u.uTurbulence) gl.uniform1f(u.uTurbulence, s.turbulence);
         if (u.uPrecipitation) gl.uniform1f(u.uPrecipitation, s.precipitation);
         if (u.uLightningIntensity) gl.uniform1f(u.uLightningIntensity, s.lightningIntensity || 0);
         if (u.uStormDarkness) gl.uniform1f(u.uStormDarkness, s.stormDarkness || 0);
+
+        // Cloud layer type uniforms (Phase 2)
+        if (u.uLowCloudType) gl.uniform1i(u.uLowCloudType, LOW_TYPE_TO_INDEX[s.lowCloudType]);
+        if (u.uMidCloudType) gl.uniform1i(u.uMidCloudType, MID_TYPE_TO_INDEX[s.midCloudType]);
+        if (u.uHighCloudType) gl.uniform1i(u.uHighCloudType, HIGH_TYPE_TO_INDEX[s.highCloudType]);
+        if (u.uLowCoverage) gl.uniform1f(u.uLowCoverage, s.lowCoverage);
+        if (u.uMidCoverage) gl.uniform1f(u.uMidCoverage, s.midCoverage);
+        if (u.uHighCoverage) gl.uniform1f(u.uHighCoverage, s.highCoverage);
+        if (u.uVerticalDevelopment) gl.uniform1f(u.uVerticalDevelopment, s.verticalDevelopment);
 
         // Atmospheric uniforms (Phase 1)
         const atmoData = atmosphereDataRef.current;
