@@ -158,6 +158,13 @@ uniform float uMidCoverage;      // 0-1 coverage for mid layer
 uniform float uHighCoverage;     // 0-1 coverage for high layer
 uniform float uVerticalDevelopment; // 0-1 towering cumulus intensity
 
+// Weather map texture uniforms
+uniform sampler2D uWeatherCoverage;   // R=coverage, G=cloudType/10, B=moisture, A=vertDev
+uniform sampler2D uWeatherWind;       // R=windX, G=windY, B=windSpeed/50, A=turbulence
+uniform sampler2D uWeatherAltitude;   // R=baseAlt/10000, G=topAlt/10000, B=thickness/5000, A=1
+uniform float uWeatherMapEnabled;     // 0 = use static map, 1 = use weather texture
+uniform float uWeatherMapExtent;      // world extent of weather map in meters
+
 // Cloud layer heights
 #define CLOUD_LAYER_LOW 200.0
 #define CLOUD_LAYER_MID 500.0
@@ -1124,10 +1131,82 @@ float getPerlinWorleyNoise(vec3 pos) {
   return mix(data.x, data.y, f);
 }
 
-// Read cloud map.
+// Sample weather map data at world position
+struct WeatherData {
+  float coverage;
+  float cloudType;
+  float moisture;
+  float verticalDev;
+  float baseAltitude;
+  float topAltitude;
+  vec2 windDir;
+  float windSpeed;
+  float turbulence;
+};
+
+WeatherData sampleWeatherMap(vec3 p) {
+  WeatherData data;
+
+  // Map world position to UV coordinates
+  float extent = uWeatherMapExtent > 0.0 ? uWeatherMapExtent : (2.0 * CLOUD_EXTENT);
+  vec2 uv = 0.5 + 0.5 * (p.xz / extent);
+  uv = clamp(uv, 0.0, 1.0);
+
+  // Sample coverage texture (RGBA: coverage, cloudType/10, moisture, vertDev)
+  vec4 coverageSample = texture(uWeatherCoverage, uv);
+  data.coverage = coverageSample.r;
+  data.cloudType = coverageSample.g * 10.0;
+  data.moisture = coverageSample.b;
+  data.verticalDev = coverageSample.a;
+
+  // Sample wind texture (RGBA: windX, windY, windSpeed/50, turbulence)
+  vec4 windSample = texture(uWeatherWind, uv);
+  data.windDir = normalize(windSample.xy + vec2(0.001)); // Avoid zero vector
+  data.windSpeed = windSample.b * 50.0;
+  data.turbulence = windSample.a;
+
+  // Sample altitude texture (RGBA: baseAlt/10000, topAlt/10000, thickness/5000, 1)
+  vec4 altSample = texture(uWeatherAltitude, uv);
+  data.baseAltitude = altSample.r * 10000.0;
+  data.topAltitude = altSample.g * 10000.0;
+
+  return data;
+}
+
+// Read cloud map - now with weather texture support
 float getCloudMap(vec3 p) {
+  if (uWeatherMapEnabled > 0.5) {
+    WeatherData weather = sampleWeatherMap(p);
+    return weather.coverage;
+  }
+
+  // Fallback to original static map
   vec2 uv = 0.5 + 0.5 * (p.xz / (2.0 * CLOUD_EXTENT));
   return texture(iChannel1, uv).b;
+}
+
+// Get cloud altitude bounds from weather map
+void getCloudAltitude(vec3 p, out float baseY, out float topY) {
+  if (uWeatherMapEnabled > 0.5) {
+    WeatherData weather = sampleWeatherMap(p);
+
+    // Normalize to cloud volume (0-1000m range maps to 0-CLOUD_EXTENT)
+    float normalizedBase = weather.baseAltitude / 10000.0;
+    float normalizedTop = weather.topAltitude / 10000.0;
+
+    baseY = cloudStart + normalizedBase * (cloudEnd - cloudStart);
+    topY = cloudStart + normalizedTop * (cloudEnd - cloudStart);
+
+    // Ensure minimum thickness
+    if (topY - baseY < 50.0) {
+      topY = baseY + 50.0;
+    }
+  } else {
+    // Fallback to original uniform-based altitude
+    baseY = cloudStart + uCloudBase01 * (cloudEnd - cloudStart);
+    float cloudMapValue = getCloudMap(p);
+    topY = baseY + (cloudEnd - cloudStart) * max(1e-3, uCloudThickness01) * max(0.3, cloudMapValue);
+  }
 }
 
 float clouds(vec3 p, out float cloudHeight, bool sampleDetail) {
@@ -1147,9 +1226,13 @@ float clouds(vec3 p, out float cloudHeight, bool sampleDetail) {
     return 0.0;
   }
 
-  // Vertical profile: base + thickness (globally tunable), with the map controlling the max height.
-  float baseY = cloudStart + uCloudBase01 * (cloudEnd - cloudStart);
-  float topY = baseY + (cloudEnd - cloudStart) * max(1e-3, uCloudThickness01) * cloud;
+  // Get altitude bounds from weather map or uniforms
+  float baseY, topY;
+  getCloudAltitude(p, baseY, topY);
+
+  // Scale topY by coverage to create natural variation
+  topY = baseY + (topY - baseY) * max(0.3, cloud);
+
   if (p.y < baseY || p.y > topY) {
     return 0.0;
   }
@@ -1160,11 +1243,27 @@ float clouds(vec3 p, out float cloudHeight, bool sampleDetail) {
   float topFade = 1.0 - smoothstep(1.0 - uCloudTopFade01, 1.0, cloudHeight);
   cloud *= bottomFade * topFade;
 
-  // Animate main shape.
-  p += vec3(uCloudShapeSpeed * iTime);
+  // Get wind data for animation if weather map is enabled
+  vec3 windOffset;
+  if (uWeatherMapEnabled > 0.5) {
+    WeatherData weather = sampleWeatherMap(p);
+    float windMag = weather.windSpeed * 0.1;
+    windOffset = vec3(weather.windDir.x * windMag, 0.0, weather.windDir.y * windMag) * iTime;
+
+    // Add turbulence variation
+    if (weather.turbulence > 0.0) {
+      float turbNoise = hash3D(p * 0.01 + iTime * 0.5);
+      windOffset += vec3(turbNoise - 0.5) * weather.turbulence * 50.0;
+    }
+  } else {
+    windOffset = vec3(uCloudShapeSpeed * iTime);
+  }
+
+  // Animate main shape with wind
+  vec3 animatedP = p + windOffset;
 
   // Get main shape noise, invert and scale it.
-  float shape = 1.0 - getPerlinWorleyNoise(shapeSize * p);
+  float shape = 1.0 - getPerlinWorleyNoise(shapeSize * animatedP);
   shape *= uCloudShapeStrength;
 
   // Carve away density from cloud based on noise.
@@ -1175,12 +1274,42 @@ float clouds(vec3 p, out float cloudHeight, bool sampleDetail) {
     return 0.0;
   }
 
+  // Apply cloud type variation if using weather map
+  if (uWeatherMapEnabled > 0.5) {
+    WeatherData weather = sampleWeatherMap(p);
+    int cloudType = int(weather.cloudType + 0.5);
+
+    // Different cloud types have different density characteristics
+    if (cloudType == 1) {
+      // Cumulus - puffy, well-defined
+      cloud *= 1.2;
+    } else if (cloudType == 2) {
+      // Stratus - flat, uniform
+      cloud *= 0.8;
+      cloud = smoothstep(0.2, 0.8, cloud);
+    } else if (cloudType == 3) {
+      // Stratocumulus - lumpy layers
+      cloud *= 0.9;
+    } else if (cloudType == 6) {
+      // Cirrus - thin, wispy
+      cloud *= 0.4;
+    } else if (cloudType == 9) {
+      // Cumulonimbus - tall, dense
+      cloud *= 1.5;
+      cloud += weather.verticalDev * 0.3 * (1.0 - cloudHeight);
+    }
+  }
+
   // Details are expensive. For shadow/light-ray marching we can often skip them.
   if (sampleDetail) {
-    // Animate details.
-    p += vec3(uCloudDetailSpeed * iTime, 0.0, 0.5 * uCloudDetailSpeed * iTime);
+    // Animate details with wind
+    vec3 detailOffset = windOffset * 0.5;
+    if (uWeatherMapEnabled < 0.5) {
+      detailOffset = vec3(uCloudDetailSpeed * iTime, 0.0, 0.5 * uCloudDetailSpeed * iTime);
+    }
+    vec3 detailP = p + detailOffset;
 
-    float detail = getPerlinWorleyNoise(detailSize * p);
+    float detail = getPerlinWorleyNoise(detailSize * detailP);
     detail *= uCloudDetailStrength;
 
     // Carve away detail based on the noise

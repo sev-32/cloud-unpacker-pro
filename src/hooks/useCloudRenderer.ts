@@ -11,6 +11,7 @@ import {
   HIGH_TYPE_TO_INDEX,
   DEFAULT_CLOUD_LAYER_SETTINGS,
 } from '../lib/cloudTypes';
+import { WeatherTextureManager } from '../lib/weatherTextureManager';
 
 export interface CloudSettings {
   // Render
@@ -116,6 +117,10 @@ export interface CloudSettings {
   flightDamping: number;
   flightBank: boolean;
   flightBankStrength: number;
+
+  // Weather Map
+  weatherMapEnabled: boolean;
+  weatherMapExtent: number;
 }
 
 export const DEFAULT_SETTINGS: CloudSettings = {
@@ -219,6 +224,10 @@ export const DEFAULT_SETTINGS: CloudSettings = {
   flightDamping: 1.5,
   flightBank: true,
   flightBankStrength: 0.6,
+
+  // Weather Map
+  weatherMapEnabled: false,
+  weatherMapExtent: 50000,
 };
 
 const BLUE_NOISE_SIZE = 1024;
@@ -329,6 +338,7 @@ export function useCloudRenderer(canvasRef: React.RefObject<HTMLCanvasElement>) 
     cape: 0,
     cloudBase: 0,
   });
+  const weatherManagerRef = useRef<WeatherTextureManager | null>(null);
 
   const buffersRef = useRef<{
     vao: WebGLVertexArrayObject | null;
@@ -704,6 +714,9 @@ void main() {
         'uSurfaceTemperature', 'uSurfacePressure', 'uSurfaceHumidity',
         'uLapseRate', 'uInversionAltitude', 'uInversionStrength',
         'uInstabilityIndex', 'uLCLAltitude', 'uCAPE', 'uAtmosphereEnabled',
+        // Weather map texture uniforms
+        'uWeatherCoverage', 'uWeatherWind', 'uWeatherAltitude',
+        'uWeatherMapEnabled', 'uWeatherMapExtent',
       ];
 
       const passImageProgram = createProgram(gl, vertexShaderSource, imageSource);
@@ -1208,6 +1221,32 @@ void main() {
         if (u.uLCLAltitude) gl.uniform1f(u.uLCLAltitude, atmoData.lcl);
         if (u.uCAPE) gl.uniform1f(u.uCAPE, atmoData.cape);
         if (u.uAtmosphereEnabled) gl.uniform1f(u.uAtmosphereEnabled, s.atmosphereEnabled ? 1.0 : 0.0);
+
+        // Weather map texture uniforms
+        if (u.uWeatherMapEnabled) gl.uniform1f(u.uWeatherMapEnabled, s.weatherMapEnabled ? 1.0 : 0.0);
+        if (u.uWeatherMapExtent) gl.uniform1f(u.uWeatherMapExtent, s.weatherMapExtent);
+
+        // Bind weather textures if available
+        const weatherMgr = weatherManagerRef.current;
+        if (weatherMgr && s.weatherMapEnabled) {
+          weatherMgr.uploadToGPU(gl);
+
+          if (u.uWeatherCoverage && weatherMgr.textures.coverageTexture) {
+            gl.activeTexture(gl.TEXTURE2);
+            gl.bindTexture(gl.TEXTURE_2D, weatherMgr.textures.coverageTexture);
+            gl.uniform1i(u.uWeatherCoverage, 2);
+          }
+          if (u.uWeatherWind && weatherMgr.textures.windTexture) {
+            gl.activeTexture(gl.TEXTURE3);
+            gl.bindTexture(gl.TEXTURE_2D, weatherMgr.textures.windTexture);
+            gl.uniform1i(u.uWeatherWind, 3);
+          }
+          if (u.uWeatherAltitude && weatherMgr.textures.altitudeTexture) {
+            gl.activeTexture(gl.TEXTURE4);
+            gl.bindTexture(gl.TEXTURE_2D, weatherMgr.textures.altitudeTexture);
+            gl.uniform1i(u.uWeatherAltitude, 4);
+          }
+        }
       }
 
       function renderPass(pass: any, fbo: WebGLFramebuffer | null, w: number, h: number) {
@@ -1487,6 +1526,10 @@ void main() {
     };
   }, [canvasRef]);
 
+  const setWeatherManager = useCallback((manager: WeatherTextureManager | null) => {
+    weatherManagerRef.current = manager;
+  }, []);
+
   return {
     isReady,
     fps,
@@ -1497,5 +1540,7 @@ void main() {
     cameraPos: cameraPosRef.current,
     atmosphereData: atmosphereDataRef.current,
     atmosphereSim: atmosphereSimRef.current,
+    setWeatherManager,
+    weatherManager: weatherManagerRef.current,
   };
 }

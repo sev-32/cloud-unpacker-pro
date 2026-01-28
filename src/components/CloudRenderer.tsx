@@ -1,13 +1,30 @@
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useCallback } from 'react';
 import { useCloudRenderer } from '@/hooks/useCloudRenderer';
 import { ControlPanel } from './ControlPanel';
 import { FlightHUD } from './FlightHUD';
-import { createInitialState, FlightState } from '@/lib/flightPhysics';
+import { WeatherMapEditor } from './WeatherMapEditor';
+import { FlightState } from '@/lib/flightPhysics';
+import { WeatherTextureManager } from '@/lib/weatherTextureManager';
+import { Map } from 'lucide-react';
+import { Button } from './ui/button';
 
 export function CloudRenderer() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { isReady, fps, settings, updateSettings, flightData, cameraPos, atmosphereData } = useCloudRenderer(canvasRef);
+  const { isReady, fps, settings, updateSettings, flightData, cameraPos, atmosphereData, setWeatherManager } = useCloudRenderer(canvasRef);
   const [showHUD, setShowHUD] = useState(true);
+  const [showWeatherMap, setShowWeatherMap] = useState(false);
+  const [isWeatherMapMaximized, setIsWeatherMapMaximized] = useState(false);
+
+  const handleWeatherManagerReady = useCallback((manager: WeatherTextureManager) => {
+    setWeatherManager(manager);
+    updateSettings({ weatherMapEnabled: true });
+  }, [setWeatherManager, updateSettings]);
+
+  const handleCloseWeatherMap = useCallback(() => {
+    setShowWeatherMap(false);
+    setIsWeatherMapMaximized(false);
+    updateSettings({ weatherMapEnabled: false });
+  }, [updateSettings]);
   
   // Create a flight state object from the renderer's flight data for the HUD
   const flightState: FlightState = {
@@ -73,12 +90,36 @@ export function CloudRenderer() {
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 pointer-events-none">
           <div className="bg-black/60 backdrop-blur-sm rounded-lg px-4 py-2 text-center">
             <div className="text-white/70 text-xs">
-              {settings.cameraMode === 'jet' 
+              {settings.cameraMode === 'jet'
                 ? 'Click to fly • WASD: Pitch/Roll • Q/E: Yaw • Shift: Boost'
                 : 'Click to fly • WASD: Move • Mouse: Look'}
             </div>
           </div>
         </div>
+      )}
+
+      {/* Weather Map Button */}
+      {isReady && !showWeatherMap && (
+        <Button
+          onClick={() => setShowWeatherMap(true)}
+          className="absolute bottom-4 left-4 bg-slate-800/90 hover:bg-slate-700/90 border border-slate-600"
+          size="sm"
+        >
+          <Map className="h-4 w-4 mr-2" />
+          Weather Map
+        </Button>
+      )}
+
+      {/* Weather Map Editor */}
+      {showWeatherMap && (
+        <WeatherMapEditor
+          onClose={handleCloseWeatherMap}
+          onWeatherManagerReady={handleWeatherManagerReady}
+          cameraPosition={cameraPos ? { x: cameraPos[0], z: cameraPos[2] } : undefined}
+          worldExtent={settings.weatherMapExtent}
+          isMaximized={isWeatherMapMaximized}
+          onToggleMaximize={() => setIsWeatherMapMaximized(!isWeatherMapMaximized)}
+        />
       )}
     </div>
   );
