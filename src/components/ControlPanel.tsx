@@ -1,9 +1,18 @@
 import { useState } from 'react';
 import { CloudSettings } from '@/hooks/useCloudRenderer';
-import { 
-  ChevronDown, ChevronUp, Settings, Sun, Moon, Cloud, 
-  Sparkles, Mountain, Plane, Eye, EyeOff, Droplets, Wind, CloudLightning
+import {
+  ChevronDown, ChevronUp, Settings, Sun, Moon, Cloud,
+  Sparkles, Mountain, Plane, Eye, EyeOff, Droplets, Wind, CloudLightning,
+  Thermometer
 } from 'lucide-react';
+import { WEATHER_PRESETS, WeatherPreset } from '@/lib/weatherPresets';
+import { kelvinToCelsius } from '@/lib/atmosphericTypes';
+
+interface AtmosphereData {
+  lcl: number;
+  cape: number;
+  cloudBase: number;
+}
 
 interface ControlPanelProps {
   settings: CloudSettings;
@@ -11,6 +20,7 @@ interface ControlPanelProps {
   fps: number;
   onToggleHUD?: () => void;
   showHUD?: boolean;
+  atmosphereData?: AtmosphereData;
 }
 
 interface SliderProps {
@@ -108,8 +118,32 @@ function Section({ title, icon, children, defaultOpen = false }: SectionProps) {
   );
 }
 
-export function ControlPanel({ settings, onUpdate, fps, onToggleHUD, showHUD }: ControlPanelProps) {
+export function ControlPanel({ settings, onUpdate, fps, onToggleHUD, showHUD, atmosphereData }: ControlPanelProps) {
   const [isOpen, setIsOpen] = useState(true);
+
+  const applyWeatherPreset = (presetId: string) => {
+    const preset = WEATHER_PRESETS[presetId];
+    if (!preset) return;
+
+    const profile = preset.atmosphericProfile;
+    onUpdate({
+      activeWeatherPreset: presetId,
+      surfaceTemperature: kelvinToCelsius(profile.surfaceConditions.temperature),
+      surfaceHumidity: profile.surfaceConditions.humidity,
+      windSpeed: profile.surfaceConditions.windSpeed,
+      windDirection: (profile.surfaceConditions.windDirection * 180) / Math.PI,
+      lapseRate: profile.lapseRate,
+      inversionAltitude: profile.inversionAltitude,
+      inversionStrength: profile.inversionStrength,
+      instabilityIndex: profile.instabilityIndex,
+      cloudCoverage: preset.cloudSettings.coverage,
+      cloudType: preset.cloudSettings.typeBlend,
+      densityMultiplier: preset.cloudSettings.density,
+      precipitation: preset.visualSettings.precipitation,
+      lightningIntensity: preset.visualSettings.lightning,
+      stormDarkness: preset.visualSettings.stormDarkness,
+    });
+  };
 
   return (
     <div className="absolute top-4 right-4 z-10">
@@ -537,23 +571,23 @@ export function ControlPanel({ settings, onUpdate, fps, onToggleHUD, showHUD }: 
             <Section title="Weather" icon={<CloudLightning size={14} />}>
               <div className="flex gap-2 mb-2">
                 <button
-                  onClick={() => onUpdate({ 
+                  onClick={() => onUpdate({
                     weatherPreset: 'clear',
                     cloudCoverage: 0.3,
                     precipitation: 0,
                     lightningIntensity: 0,
-                    stormDarkness: 0 
+                    stormDarkness: 0
                   })}
                   className={`flex-1 py-1.5 px-2 text-xs rounded-lg transition-colors ${
-                    settings.weatherPreset === 'clear' 
-                      ? 'bg-yellow-500/30 border border-yellow-400/50 text-yellow-200' 
+                    settings.weatherPreset === 'clear'
+                      ? 'bg-yellow-500/30 border border-yellow-400/50 text-yellow-200'
                       : 'bg-white/10 border border-white/10 text-white/60 hover:text-white'
                   }`}
                 >
-                  ☀️ Clear
+                  Clear
                 </button>
                 <button
-                  onClick={() => onUpdate({ 
+                  onClick={() => onUpdate({
                     weatherPreset: 'cloudy',
                     cloudCoverage: 0.7,
                     cloudType: 0.4,
@@ -562,15 +596,15 @@ export function ControlPanel({ settings, onUpdate, fps, onToggleHUD, showHUD }: 
                     stormDarkness: 0.2
                   })}
                   className={`flex-1 py-1.5 px-2 text-xs rounded-lg transition-colors ${
-                    settings.weatherPreset === 'cloudy' 
-                      ? 'bg-gray-500/30 border border-gray-400/50 text-gray-200' 
+                    settings.weatherPreset === 'cloudy'
+                      ? 'bg-gray-500/30 border border-gray-400/50 text-gray-200'
                       : 'bg-white/10 border border-white/10 text-white/60 hover:text-white'
                   }`}
                 >
-                  ☁️ Cloudy
+                  Cloudy
                 </button>
                 <button
-                  onClick={() => onUpdate({ 
+                  onClick={() => onUpdate({
                     weatherPreset: 'stormy',
                     cloudCoverage: 0.95,
                     cloudType: 0.3,
@@ -580,12 +614,12 @@ export function ControlPanel({ settings, onUpdate, fps, onToggleHUD, showHUD }: 
                     turbulence: 0.7
                   })}
                   className={`flex-1 py-1.5 px-2 text-xs rounded-lg transition-colors ${
-                    settings.weatherPreset === 'stormy' 
-                      ? 'bg-purple-500/30 border border-purple-400/50 text-purple-200' 
+                    settings.weatherPreset === 'stormy'
+                      ? 'bg-sky-500/30 border border-sky-400/50 text-sky-200'
                       : 'bg-white/10 border border-white/10 text-white/60 hover:text-white'
                   }`}
                 >
-                  ⛈️ Storm
+                  Storm
                 </button>
               </div>
               <Slider
@@ -612,6 +646,118 @@ export function ControlPanel({ settings, onUpdate, fps, onToggleHUD, showHUD }: 
                 step={0.05}
                 onChange={(v) => onUpdate({ stormDarkness: v })}
               />
+            </Section>
+
+            {/* Atmosphere (Phase 1) */}
+            <Section title="Atmosphere" icon={<Thermometer size={14} />}>
+              <Toggle
+                label="Enable Physics"
+                checked={settings.atmosphereEnabled}
+                onChange={(v) => onUpdate({ atmosphereEnabled: v })}
+              />
+
+              {settings.atmosphereEnabled && (
+                <>
+                  <div className="text-xs text-white/50 mb-2">Weather Presets</div>
+                  <div className="grid grid-cols-2 gap-1 mb-3">
+                    {Object.entries(WEATHER_PRESETS).slice(0, 6).map(([id, preset]) => (
+                      <button
+                        key={id}
+                        onClick={() => applyWeatherPreset(id)}
+                        className={`py-1 px-2 text-[10px] rounded transition-colors ${
+                          settings.activeWeatherPreset === id
+                            ? 'bg-sky-500/30 border border-sky-400/50 text-sky-200'
+                            : 'bg-white/10 border border-white/10 text-white/60 hover:text-white'
+                        }`}
+                      >
+                        {preset.name}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="space-y-2 pt-2 border-t border-white/10">
+                    <div className="text-xs text-white/50">Surface Conditions</div>
+                    <Slider
+                      label="Temperature"
+                      value={settings.surfaceTemperature}
+                      min={-20}
+                      max={45}
+                      step={1}
+                      onChange={(v) => onUpdate({ surfaceTemperature: v })}
+                      format={(v) => `${v.toFixed(0)}C`}
+                    />
+                    <Slider
+                      label="Humidity"
+                      value={settings.surfaceHumidity}
+                      min={0.1}
+                      max={1}
+                      step={0.05}
+                      onChange={(v) => onUpdate({ surfaceHumidity: v })}
+                      format={(v) => `${(v * 100).toFixed(0)}%`}
+                    />
+                  </div>
+
+                  <div className="space-y-2 pt-2 border-t border-white/10">
+                    <div className="text-xs text-white/50">Atmospheric Profile</div>
+                    <Slider
+                      label="Lapse Rate"
+                      value={settings.lapseRate}
+                      min={4}
+                      max={12}
+                      step={0.5}
+                      onChange={(v) => onUpdate({ lapseRate: v })}
+                      format={(v) => `${v.toFixed(1)} K/km`}
+                    />
+                    <Slider
+                      label="Instability"
+                      value={settings.instabilityIndex}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      onChange={(v) => onUpdate({ instabilityIndex: v })}
+                      format={(v) => v < 0.3 ? 'Stable' : v < 0.6 ? 'Moderate' : 'Unstable'}
+                    />
+                  </div>
+
+                  <div className="space-y-2 pt-2 border-t border-white/10">
+                    <div className="text-xs text-white/50">Inversion Layer</div>
+                    <Slider
+                      label="Altitude"
+                      value={settings.inversionAltitude}
+                      min={200}
+                      max={5000}
+                      step={100}
+                      onChange={(v) => onUpdate({ inversionAltitude: v })}
+                      format={(v) => `${(v / 1000).toFixed(1)} km`}
+                    />
+                    <Slider
+                      label="Strength"
+                      value={settings.inversionStrength}
+                      min={0}
+                      max={10}
+                      step={0.5}
+                      onChange={(v) => onUpdate({ inversionStrength: v })}
+                      format={(v) => v === 0 ? 'None' : `${v.toFixed(1)} K`}
+                    />
+                  </div>
+
+                  {atmosphereData && (
+                    <div className="space-y-1 pt-2 border-t border-white/10">
+                      <div className="text-xs text-white/50 mb-1">Computed Values</div>
+                      <div className="grid grid-cols-2 gap-2 text-[10px]">
+                        <div className="bg-white/5 rounded px-2 py-1">
+                          <div className="text-white/40">Cloud Base (LCL)</div>
+                          <div className="text-white font-mono">{(atmosphereData.lcl / 1000).toFixed(2)} km</div>
+                        </div>
+                        <div className="bg-white/5 rounded px-2 py-1">
+                          <div className="text-white/40">CAPE</div>
+                          <div className="text-white font-mono">{atmosphereData.cape.toFixed(0)} J/kg</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </Section>
           </div>
 

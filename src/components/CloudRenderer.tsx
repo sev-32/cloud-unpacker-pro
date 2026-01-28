@@ -6,7 +6,7 @@ import { createInitialState, FlightState } from '@/lib/flightPhysics';
 
 export function CloudRenderer() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { isReady, fps, settings, updateSettings, flightData, cameraPos } = useCloudRenderer(canvasRef);
+  const { isReady, fps, settings, updateSettings, flightData, cameraPos, atmosphereData } = useCloudRenderer(canvasRef);
   const [showHUD, setShowHUD] = useState(true);
   
   // Create a flight state object from the renderer's flight data for the HUD
@@ -58,12 +58,13 @@ export function CloudRenderer() {
       )}
       
       {isReady && (
-        <ControlPanel 
-          settings={settings} 
-          onUpdate={updateSettings} 
+        <ControlPanel
+          settings={settings}
+          onUpdate={updateSettings}
           fps={fps}
           onToggleHUD={() => setShowHUD(!showHUD)}
           showHUD={showHUD}
+          atmosphereData={atmosphereData}
         />
       )}
       

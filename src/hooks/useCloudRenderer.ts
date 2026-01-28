@@ -1,4 +1,7 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
+import { AtmosphericSimulation, createAtmosphericSimulation } from '../lib/atmosphericSimulation';
+import { kelvinToCelsius, celsiusToKelvin } from '../lib/atmosphericTypes';
+import { WEATHER_PRESETS, WeatherPreset, interpolatePresets } from '../lib/weatherPresets';
 
 export interface CloudSettings {
   // Render
@@ -64,6 +67,16 @@ export interface CloudSettings {
   lightningIntensity: number;
   stormDarkness: number;
   weatherPreset: 'clear' | 'cloudy' | 'stormy';
+
+  // Atmosphere (Phase 1)
+  surfaceTemperature: number;
+  surfaceHumidity: number;
+  lapseRate: number;
+  inversionAltitude: number;
+  inversionStrength: number;
+  instabilityIndex: number;
+  atmosphereEnabled: boolean;
+  activeWeatherPreset: string;
 
   // Terrain
   terrainEnabled: boolean;
@@ -149,6 +162,16 @@ export const DEFAULT_SETTINGS: CloudSettings = {
   lightningIntensity: 0,
   stormDarkness: 0,
   weatherPreset: 'clear',
+
+  // Atmosphere (Phase 1)
+  surfaceTemperature: 20,
+  surfaceHumidity: 0.6,
+  lapseRate: 9.8,
+  inversionAltitude: 1500,
+  inversionStrength: 0,
+  instabilityIndex: 0.3,
+  atmosphereEnabled: true,
+  activeWeatherPreset: 'fairWeatherCumulus',
 
   // Terrain
   terrainEnabled: true,
@@ -272,6 +295,13 @@ export function useCloudRenderer(canvasRef: React.RefObject<HTMLCanvasElement>) 
 
   const isPointerLockedRef = useRef(false);
   const flyLookRef = useRef({ dx: 0, dy: 0 });
+
+  const atmosphereSimRef = useRef<AtmosphericSimulation | null>(null);
+  const atmosphereDataRef = useRef({
+    lcl: 0,
+    cape: 0,
+    cloudBase: 0,
+  });
 
   const buffersRef = useRef<{
     vao: WebGLVertexArrayObject | null;
@@ -640,6 +670,10 @@ void main() {
         // Multi-layer cloud and weather uniforms
         'uCloudCoverage', 'uCloudTypeBlend', 'uWindSpeed', 'uWindDirection',
         'uTurbulence', 'uPrecipitation', 'uLightningIntensity', 'uStormDarkness',
+        // Atmospheric uniforms (Phase 1)
+        'uSurfaceTemperature', 'uSurfacePressure', 'uSurfaceHumidity',
+        'uLapseRate', 'uInversionAltitude', 'uInversionStrength',
+        'uInstabilityIndex', 'uLCLAltitude', 'uCAPE', 'uAtmosphereEnabled',
       ];
 
       const passImageProgram = createProgram(gl, vertexShaderSource, imageSource);
@@ -714,6 +748,21 @@ void main() {
       };
 
       resizeRenderTargets();
+
+      // Initialize atmospheric simulation
+      const initSettings = settingsRef.current;
+      atmosphereSimRef.current = createAtmosphericSimulation(
+        celsiusToKelvin(initSettings.surfaceTemperature),
+        initSettings.surfaceHumidity,
+        initSettings.instabilityIndex
+      );
+      const atmoUniforms = atmosphereSimRef.current.getUniformData();
+      atmosphereDataRef.current = {
+        lcl: atmoUniforms.lcl,
+        cape: atmoUniforms.cape,
+        cloudBase: atmoUniforms.lcl,
+      };
+
       setIsReady(true);
       lastNowRef.current = performance.now();
       tick();
@@ -829,6 +878,29 @@ void main() {
       simTimeRef.current += simTimeDelta * settings.timeScale;
       const time = simTimeRef.current;
       const frame = frameRef.current;
+
+      // Update atmospheric simulation
+      if (atmosphereSimRef.current && settings.atmosphereEnabled) {
+        atmosphereSimRef.current.setSurfaceConditions({
+          temperature: celsiusToKelvin(settings.surfaceTemperature),
+          humidity: settings.surfaceHumidity,
+          windSpeed: settings.windSpeed,
+          windDirection: settings.windDirection * Math.PI / 180,
+        });
+        atmosphereSimRef.current.setProfile({
+          lapseRate: settings.lapseRate,
+          inversionAltitude: settings.inversionAltitude,
+          inversionStrength: settings.inversionStrength,
+          instabilityIndex: settings.instabilityIndex,
+        });
+        atmosphereSimRef.current.update(simTimeDelta * 1000);
+        const atmoUniforms = atmosphereSimRef.current.getUniformData();
+        atmosphereDataRef.current = {
+          lcl: atmoUniforms.lcl,
+          cape: atmoUniforms.cape,
+          cloudBase: atmoUniforms.lcl,
+        };
+      }
 
       const state = stateRef.current;
       const { rtWidth, rtHeight } = b;
@@ -1084,6 +1156,19 @@ void main() {
         if (u.uPrecipitation) gl.uniform1f(u.uPrecipitation, s.precipitation);
         if (u.uLightningIntensity) gl.uniform1f(u.uLightningIntensity, s.lightningIntensity || 0);
         if (u.uStormDarkness) gl.uniform1f(u.uStormDarkness, s.stormDarkness || 0);
+
+        // Atmospheric uniforms (Phase 1)
+        const atmoData = atmosphereDataRef.current;
+        if (u.uSurfaceTemperature) gl.uniform1f(u.uSurfaceTemperature, celsiusToKelvin(s.surfaceTemperature));
+        if (u.uSurfacePressure) gl.uniform1f(u.uSurfacePressure, 1013.25);
+        if (u.uSurfaceHumidity) gl.uniform1f(u.uSurfaceHumidity, s.surfaceHumidity);
+        if (u.uLapseRate) gl.uniform1f(u.uLapseRate, s.lapseRate);
+        if (u.uInversionAltitude) gl.uniform1f(u.uInversionAltitude, s.inversionAltitude);
+        if (u.uInversionStrength) gl.uniform1f(u.uInversionStrength, s.inversionStrength);
+        if (u.uInstabilityIndex) gl.uniform1f(u.uInstabilityIndex, s.instabilityIndex);
+        if (u.uLCLAltitude) gl.uniform1f(u.uLCLAltitude, atmoData.lcl);
+        if (u.uCAPE) gl.uniform1f(u.uCAPE, atmoData.cape);
+        if (u.uAtmosphereEnabled) gl.uniform1f(u.uAtmosphereEnabled, s.atmosphereEnabled ? 1.0 : 0.0);
       }
 
       function renderPass(pass: any, fbo: WebGLFramebuffer | null, w: number, h: number) {
@@ -1371,5 +1456,7 @@ void main() {
     resetHistory,
     flightData: flightDataRef.current,
     cameraPos: cameraPosRef.current,
+    atmosphereData: atmosphereDataRef.current,
+    atmosphereSim: atmosphereSimRef.current,
   };
 }

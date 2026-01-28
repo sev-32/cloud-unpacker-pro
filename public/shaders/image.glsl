@@ -137,6 +137,18 @@ uniform float uPrecipitation;     // precipitation intensity (darkens clouds)
 uniform float uLightningIntensity; // 0-1 lightning flash intensity
 uniform float uStormDarkness;      // 0-1 darkens sky during storm
 
+// Atmospheric simulation uniforms (Phase 1)
+uniform float uSurfaceTemperature;  // Kelvin
+uniform float uSurfacePressure;     // hPa
+uniform float uSurfaceHumidity;     // 0-1
+uniform float uLapseRate;           // K/km
+uniform float uInversionAltitude;   // meters
+uniform float uInversionStrength;   // Kelvin
+uniform float uInstabilityIndex;    // 0-1
+uniform float uLCLAltitude;         // meters - Lifting Condensation Level
+uniform float uCAPE;                // J/kg - Convective Available Potential Energy
+uniform float uAtmosphereEnabled;   // 0 or 1
+
 // Cloud layer heights
 #define CLOUD_LAYER_LOW 200.0
 #define CLOUD_LAYER_MID 500.0
@@ -206,7 +218,7 @@ float fbmClouds(vec3 p, int octaves) {
 float worleyNoise(vec3 p) {
   vec3 i = floor(p);
   vec3 f = fract(p);
-  
+
   float minDist = 1.0;
   for (int x = -1; x <= 1; x++) {
     for (int y = -1; y <= 1; y++) {
@@ -218,6 +230,67 @@ float worleyNoise(vec3 p) {
     }
   }
   return sqrt(minDist);
+}
+
+// ============= ATMOSPHERIC PHYSICS FUNCTIONS (Phase 1) =============
+const float KELVIN_OFFSET = 273.15;
+const float DRY_LAPSE_RATE_DEFAULT = 9.8; // K/km
+const float MOIST_LAPSE_RATE = 6.5; // K/km
+
+float atmosphericTemperature(float altitude) {
+  float lapseKm = uLapseRate / 1000.0;
+  float temp = uSurfaceTemperature - lapseKm * altitude;
+
+  if (altitude > uInversionAltitude && uInversionStrength > 0.0) {
+    float aboveInversion = altitude - uInversionAltitude;
+    float inversionEffect = uInversionStrength * (1.0 - exp(-aboveInversion / 500.0));
+    temp += inversionEffect;
+  }
+
+  return max(temp, 180.0);
+}
+
+float atmosphericHumidity(float altitude) {
+  float decay = exp(-altitude / 8000.0);
+  return uSurfaceHumidity * decay;
+}
+
+float condensationProbability(float altitude) {
+  if (uAtmosphereEnabled < 0.5) return 1.0;
+
+  float lcl = max(50.0, uLCLAltitude);
+
+  if (altitude < lcl * 0.8) return 0.0;
+
+  float transitionStart = lcl * 0.8;
+  float transitionEnd = lcl * 1.2;
+  float condensation = smoothstep(transitionStart, transitionEnd, altitude);
+
+  float humidity = atmosphericHumidity(altitude);
+  condensation *= humidity / max(0.1, uSurfaceHumidity);
+
+  float instabilityBoost = 1.0 + uInstabilityIndex * 0.5;
+  condensation *= instabilityBoost;
+
+  return saturate(condensation);
+}
+
+float convectiveBoost(float altitude) {
+  if (uAtmosphereEnabled < 0.5) return 1.0;
+
+  float normalizedCAPE = min(1.0, uCAPE / 2000.0);
+  float instabilityEffect = uInstabilityIndex * normalizedCAPE;
+
+  float lcl = max(50.0, uLCLAltitude);
+  float aboveLCL = max(0.0, altitude - lcl);
+  float verticalDevelopment = smoothstep(0.0, 3000.0, aboveLCL);
+
+  return 1.0 + instabilityEffect * verticalDevelopment * 2.0;
+}
+
+float getAtmosphericCloudBase() {
+  if (uAtmosphereEnabled < 0.5) return CLOUD_LAYER_LOW * 0.8;
+  return max(50.0, uLCLAltitude * 0.9);
 }
 
 // ============= TERRAIN FUNCTIONS =============
@@ -446,85 +519,110 @@ vec3 getTerrainColor(vec3 pos, vec3 nor, vec3 rd, vec3 sunDir, float dist, vec3 
 // ============= MULTI-LAYER CLOUD SYSTEM =============
 // Get cloud density for cumulus (puffy, lower altitude)
 float getCumulusDensity(vec3 p, float baseHeight, float topHeight) {
-  if (p.y < baseHeight || p.y > topHeight) return 0.0;
-  
-  float heightFrac = (p.y - baseHeight) / (topHeight - baseHeight);
-  
-  // Cumulus has a flat base and rounded top
+  float atmosphericBase = getAtmosphericCloudBase();
+  float adjustedBase = mix(baseHeight, atmosphericBase, uAtmosphereEnabled);
+  float adjustedTop = adjustedBase + (topHeight - baseHeight) * convectiveBoost(p.y);
+
+  if (p.y < adjustedBase || p.y > adjustedTop) return 0.0;
+
+  float condensation = condensationProbability(p.y);
+  if (condensation < 0.01) return 0.0;
+
+  float heightFrac = (p.y - adjustedBase) / (adjustedTop - adjustedBase);
+
   float baseProfile = smoothstep(0.0, 0.15, heightFrac);
   float topProfile = 1.0 - pow(heightFrac, 0.5);
   float profile = baseProfile * topProfile;
-  
-  // Wind offset
+
   vec2 windOffset = vec2(cos(uWindDirection), sin(uWindDirection)) * uWindSpeed * iTime;
   vec3 wp = p + vec3(windOffset.x, 0.0, windOffset.y);
-  
-  // Large billowing shapes
+
   float shape = fbmClouds(wp * 0.002, 5);
   shape = smoothstep(0.3 - uCloudCoverage * 0.2, 0.7, shape);
-  
-  // Add worley noise for billowing detail
+
   float billows = 1.0 - worleyNoise(wp * 0.008);
   shape *= mix(0.8, 1.2, billows);
-  
-  // Fine detail
+
   float detail = fbmClouds(wp * 0.015 + vec3(iTime * 0.5), 4);
   shape = saturate(remap(shape, detail * 0.3, 1.0, 0.0, 1.0));
-  
-  // Turbulence
+
   float turb = fbmClouds(wp * 0.03 + vec3(iTime * 2.0), 3);
   shape *= 1.0 + uTurbulence * (turb - 0.5) * 0.5;
-  
-  return shape * profile * 0.08;
+
+  float convectiveEnhancement = convectiveBoost(p.y);
+  shape *= convectiveEnhancement;
+
+  return shape * profile * condensation * 0.08;
 }
 
 // Get cloud density for stratus (flat, layered, mid altitude)
 float getStratusDensity(vec3 p, float baseHeight, float topHeight) {
-  if (p.y < baseHeight || p.y > topHeight) return 0.0;
-  
-  float heightFrac = (p.y - baseHeight) / (topHeight - baseHeight);
-  
-  // Stratus is relatively flat with some undulation
+  float condensation = condensationProbability(p.y);
+
+  float inversionInfluence = 0.0;
+  if (uAtmosphereEnabled > 0.5 && uInversionStrength > 0.0) {
+    float distToInversion = abs(p.y - uInversionAltitude);
+    inversionInfluence = exp(-distToInversion / 300.0) * uInversionStrength * 0.1;
+  }
+
+  float adjustedBase = baseHeight;
+  float adjustedTop = topHeight;
+  if (uAtmosphereEnabled > 0.5 && uInversionStrength > 1.0) {
+    adjustedBase = min(baseHeight, uInversionAltitude - 200.0);
+    adjustedTop = min(topHeight, uInversionAltitude + 300.0);
+  }
+
+  if (p.y < adjustedBase || p.y > adjustedTop) return 0.0;
+
+  float heightFrac = (p.y - adjustedBase) / (adjustedTop - adjustedBase);
+
   float profile = smoothstep(0.0, 0.2, heightFrac) * smoothstep(1.0, 0.7, heightFrac);
-  
+
   vec2 windOffset = vec2(cos(uWindDirection), sin(uWindDirection)) * uWindSpeed * iTime * 0.7;
   vec3 wp = p + vec3(windOffset.x, 0.0, windOffset.y);
-  
-  // Stretched horizontal noise for layered look
+
   float shape = fbmClouds(vec3(wp.x * 0.001, wp.y * 0.005, wp.z * 0.001), 6);
   shape = smoothstep(0.35 - uCloudCoverage * 0.15, 0.6, shape);
-  
-  // Less vertical variation
+
   float detail = fbmClouds(wp * 0.01, 4);
   shape = saturate(remap(shape, detail * 0.2, 1.0, 0.0, 1.0));
-  
-  return shape * profile * 0.05;
+
+  shape *= (1.0 + inversionInfluence);
+
+  return shape * profile * condensation * 0.05;
 }
 
 // Get cloud density for cirrus (wispy, high altitude)
 float getCirrusDensity(vec3 p, float baseHeight, float topHeight) {
   if (p.y < baseHeight || p.y > topHeight) return 0.0;
-  
+
+  float highAltHumidity = atmosphericHumidity(p.y);
+  float cirrusThreshold = 0.15;
+  if (uAtmosphereEnabled > 0.5 && highAltHumidity < cirrusThreshold) {
+    float humidityFactor = highAltHumidity / cirrusThreshold;
+    if (humidityFactor < 0.3) return 0.0;
+  }
+
   float heightFrac = (p.y - baseHeight) / (topHeight - baseHeight);
   float profile = smoothstep(0.0, 0.3, heightFrac) * smoothstep(1.0, 0.5, heightFrac);
-  
+
   vec2 windOffset = vec2(cos(uWindDirection), sin(uWindDirection)) * uWindSpeed * iTime * 1.5;
   vec3 wp = p + vec3(windOffset.x, 0.0, windOffset.y);
-  
-  // Very stretched, wispy noise
+
   float shape = fbmClouds(vec3(wp.x * 0.0005, wp.y * 0.02, wp.z * 0.0005), 7);
-  
-  // Fiber-like streaks
+
   float streak = sin(wp.x * 0.002 + wp.z * 0.003 + iTime * 0.3) * 0.5 + 0.5;
   shape *= 0.5 + 0.5 * streak;
-  
+
   shape = smoothstep(0.4 - uCloudCoverage * 0.1, 0.65, shape);
-  
-  // Fine ice crystal detail
+
   float ice = fbmClouds(wp * 0.05, 4);
   shape *= 0.7 + 0.3 * ice;
-  
-  return shape * profile * 0.025;
+
+  float humidityMod = uAtmosphereEnabled > 0.5 ? (highAltHumidity / 0.4) : 1.0;
+  humidityMod = clamp(humidityMod, 0.3, 1.5);
+
+  return shape * profile * humidityMod * 0.025;
 }
 
 // Combined multi-layer cloud density function
