@@ -14,10 +14,10 @@ export interface WeatherMapInteraction {
   isDrawing: boolean;
   currentFrontPoints: { x: number; y: number }[];
   hoveredPosition: { worldX: number; worldZ: number } | null;
-  handleMouseDown: (e: React.MouseEvent<HTMLCanvasElement>) => void;
-  handleMouseMove: (e: React.MouseEvent<HTMLCanvasElement>) => void;
-  handleMouseUp: (e: React.MouseEvent<HTMLCanvasElement>) => void;
-  handleWheel: (e: React.WheelEvent<HTMLCanvasElement>) => void;
+  handleMouseDown: (e: React.MouseEvent<HTMLElement>) => void;
+  handleMouseMove: (e: React.MouseEvent<HTMLElement>) => void;
+  handleMouseUp: (e: React.MouseEvent<HTMLElement>) => void;
+  handleWheel: (e: React.WheelEvent<HTMLElement>) => void;
   resetView: () => void;
   canvasToWorld: (canvasX: number, canvasY: number) => { worldX: number; worldZ: number };
   worldToCanvas: (worldX: number, worldZ: number) => { canvasX: number; canvasY: number };
@@ -135,7 +135,7 @@ export function useWeatherMapInteraction({
     onBrushStroke?.();
   }, [weatherManager, activeTool, brushSettings, selectedCloudType, onBrushStroke]);
 
-  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLElement>) => {
     const { worldX, worldZ } = canvasToWorld(e.clientX, e.clientY);
     lastMousePos.current = { x: e.clientX, y: e.clientY };
 
@@ -168,7 +168,7 @@ export function useWeatherMapInteraction({
   }, [canvasToWorld, activeTool, selectedPressureType, pressureRadius, pressureIntensity,
       onPressureSystemAdd, applyBrushAtPosition]);
 
-  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLElement>) => {
     const { worldX, worldZ } = canvasToWorld(e.clientX, e.clientY);
     setHoveredPosition({ worldX, worldZ });
 
@@ -193,7 +193,7 @@ export function useWeatherMapInteraction({
     }
   }, [canvasToWorld, isPanning, isDrawing, activeTool, applyBrushAtPosition]);
 
-  const handleMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleMouseUp = useCallback((e: React.MouseEvent<HTMLElement>) => {
     if (isPanning) {
       setIsPanning(false);
       lastMousePos.current = null;
@@ -213,7 +213,7 @@ export function useWeatherMapInteraction({
     }
   }, [isPanning, isDrawing, activeTool, canvasToWorld, onWindDraw]);
 
-  const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
+  const handleWheel = useCallback((e: React.WheelEvent<HTMLElement>) => {
     e.preventDefault();
 
     const canvas = canvasRef.current;

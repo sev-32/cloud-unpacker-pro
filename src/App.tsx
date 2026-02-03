@@ -7,6 +7,7 @@ import { WeatherProvider } from "./contexts/WeatherContext";
 import Landing from "./pages/Landing";
 import Viewer from "./pages/Viewer";
 import WeatherEditorPage from "./pages/WeatherEditorPage";
+import SplitWeatherEditor from "./components/SplitWeatherEditor";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -21,8 +22,9 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="/viewer" element={<Viewer />} />
-            <Route path="/editor" element={<WeatherEditorPage />} />
+            <Route path="/editor" element={<SplitWeatherEditor />} />
             <Route path="/editor/:mapId" element={<WeatherEditorPage />} />
+            <Route path="/editor-classic" element={<WeatherEditorPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
